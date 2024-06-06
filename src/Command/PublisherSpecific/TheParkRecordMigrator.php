@@ -4,12 +4,17 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use DOMDocument;
 use DOMNode;
+use DOMNodeList;
+use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
 use stdClass;
 use WP_CLI;
+use WP_Error;
 
 /**
  * Class TheParkRecordMigrator
@@ -18,7 +23,9 @@ class TheParkRecordMigrator implements InterfaceCommand {
 
 	const GUEST_AUTHOR_SCRAPE_META = 'newspack_guest_author_scrape_done';
 	const ORIGINAL_POST_ID_META    = 'original_post_id';
+	const IMAGE_SCRAPED_POST_META  = 'newspack_image_scraped';
 	const API_URL_POST             = 'https://www.parkrecord.com/wp-json/wp/v2/posts';
+	const API_URL_MEDIA            = 'https://www.parkrecord.com/wp-json/wp/v2/media';
 
 	/**
 	 * TheParkRecordMigrator Instance.
@@ -33,6 +40,20 @@ class TheParkRecordMigrator implements InterfaceCommand {
 	 * @var CoAuthorPlus $co_author_plus
 	 */
 	private CoAuthorPlus $co_author_plus;
+
+	/**
+	 * DOMDocument instance.
+	 *
+	 * @var DOMDocument $dom
+	 */
+	private DOMDocument $dom;
+
+	/**
+	 * Attachments instance.
+	 *
+	 * @var Attachments $attachments
+	 */
+	private Attachments $attachments;
 
 	/**
 	 * TheParkRecordMigrator constructor.
@@ -50,6 +71,10 @@ class TheParkRecordMigrator implements InterfaceCommand {
 		if ( null === self::$instance ) {
 			self::$instance                 = new $class();
 			self::$instance->co_author_plus = new CoAuthorPlus();
+			self::$instance->dom            = new DOMDocument();
+			libxml_use_internal_errors( true );
+
+			self::$instance->attachments = new Attachments();
 		}
 
 		return self::$instance;
@@ -88,6 +113,40 @@ class TheParkRecordMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'xml-path',
 						'description' => 'The path to XML files containing imported posts',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator the-park-record-scrape-attachment-images',
+			[ $this, 'cmd_scrape_attachment_images' ],
+			[
+				'shortdesc' => 'Loops through all attachment rows in the DB and downloads the images locally.',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'credentials',
+						'description' => 'Application username and password.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator the-park-record-fix-broken-images',
+			[ $this, 'cmd_fix_broken_images' ],
+			[
+				'shortdesc' => 'Fixes broken images from a pre-processed list of broken images.',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'broken-images-file-path',
+						'description' => 'The path to the file containing the broken images.',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -562,6 +621,248 @@ class TheParkRecordMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Downloads attachment images locally.
+	 *
+	 * This is necessary because the images are hosted on S3, and we don't have direct access to them.
+	 *
+	 * @param array $args Positional arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_scrape_attachment_images( array $args ): void {
+		global $wpdb;
+
+		$credentials = $args[0];
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$attachments = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT
+						p.ID as post_id,
+						pm.meta_value as original_post_id
+					FROM $wpdb->posts p
+						LEFT JOIN $wpdb->postmeta pm
+							ON p.ID = pm.post_id
+					WHERE p.post_type = 'attachment'
+					  AND p.post_mime_type LIKE %s
+					  AND pm.meta_key = %s
+					  AND pm.post_id NOT IN (
+						  SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s
+					  )",
+				$wpdb->esc_like( 'image/' ) . '%',
+				self::ORIGINAL_POST_ID_META,
+				self::IMAGE_SCRAPED_POST_META
+			)
+		);
+
+		foreach ( $attachments as $attachment ) {
+			echo "\n";
+			$original_post_id = $attachment->original_post_id ?? $attachment->post_id;
+
+			$console = ConsoleColor::white( 'Processing Attachment ID:' )->bright_white( $attachment->post_id );
+
+			if ( $original_post_id !== $attachment->post_id ) {
+				$console->white( '→' )->underlined_white( $original_post_id );
+			}
+
+			$console->output();
+
+			$maybe_attachment_data = $this->get_attachment_info_from_source( $original_post_id, $credentials );
+
+			if ( is_wp_error( $maybe_attachment_data ) ) {
+				ConsoleColor::red( "Error fetching source URL. {$maybe_attachment_data->get_error_message()}" )->output();
+				continue;
+			}
+
+			$local_file_path = wp_upload_dir()['basedir'] . '/' . $maybe_attachment_data['uploads_path'];
+
+			if ( file_exists( $local_file_path ) ) {
+				ConsoleColor::green( 'File already exists.' )
+							->white( $maybe_attachment_data['full_size_source_url'] )
+							->underlined_bright_white( $local_file_path )
+							->output();
+				update_post_meta( $attachment->post_id, self::IMAGE_SCRAPED_POST_META, 'already_downloaded' );
+				update_post_meta( $attachment->post_id, self::IMAGE_SCRAPED_POST_META . ':path', $local_file_path );
+				continue;
+			}
+
+			if ( empty( $maybe_attachment_data['full_size_source_url'] ) ) {
+				ConsoleColor::yellow( 'No source URL found.' )->output();
+				$maybe_attachment_data['full_size_source_url'] = 'https://www.parkrecord.com/wp-content/uploads/sites/11/' . $maybe_attachment_data['uploads_path'];
+			}
+
+			$maybe_downloaded_file_path = download_url( $maybe_attachment_data['full_size_source_url'] );
+
+			if ( is_wp_error( $maybe_downloaded_file_path ) ) {
+				ConsoleColor::red( "Error downloading file. {$maybe_downloaded_file_path->get_error_message()}" )->output();
+				continue;
+			}
+
+			ConsoleColor::white( 'Attempting to move' )
+						->cyan( $maybe_downloaded_file_path )
+						->white( 'to' )
+						->underlined_bright_cyan( $local_file_path )
+						->output();
+			$maybe_moved = rename( $maybe_downloaded_file_path, $local_file_path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename -- global $wp_filesytem returns null?
+
+			if ( ! $maybe_moved ) {
+				ConsoleColor::red( 'Error moving file.' )->output();
+				continue;
+			}
+
+			ConsoleColor::green( 'File downloaded and moved.' )->output();
+			update_post_meta( $attachment->post_id, self::IMAGE_SCRAPED_POST_META, 'downloaded' );
+		}
+	}
+
+	/**
+	 * This command uses a pre-processed list of posts with URLs pointing to images that don't exist (broken images).
+	 * With that list, this command will look at each post_id & image_url and attempt to find that image in the DB.
+	 *
+	 * @param array $args Positional arguments.
+	 *
+	 * @return void
+	 * @throws Exception When the file is not found.
+	 */
+	public function cmd_fix_broken_images( array $args ): void {
+		$broken_images_file_path = $args[0];
+
+		$previous_post_id = 0;
+
+		global $wpdb;
+
+		foreach ( ( new FileImportFactory() )->get_file( $broken_images_file_path )->getIterator() as $row ) {
+			echo "\n";
+			$post_id   = intval( $row['post_id'] );
+			$image_url = $row['image_url'];
+
+			if ( $post_id !== $previous_post_id ) { // Want to keep the output of which Post ID we're processing clean.
+				echo "\n";
+				ConsoleColor::white( '----------------------------------------' )->output();
+				$console          = ConsoleColor::cyan( 'Processing Post ID:' )->bright_cyan( $post_id );
+				$previous_post_id = $post_id;
+
+				$original_post_id = $this->get_original_post_id( $post_id );
+
+				if ( $original_post_id !== $post_id ) {
+					$console->white( '→' )->underlined_bright_cyan( $original_post_id )->output();
+				} else {
+					$console->output();
+				}
+			}
+
+			ConsoleColor::white( 'Post Image URL:' )->bright_white( $image_url )->output();
+			$filename = basename( $image_url );
+			ConsoleColor::white( 'Filename:' )->bright_white( $filename )->output();
+			$decoded_filename  = esc_sql( sanitize_file_name( rawurlencode( $filename ) ) );
+			$decoded_image_url = str_replace( $filename, $decoded_filename, $image_url );
+
+			ConsoleColor::bright_blue( 'Near Exact Match' )->output();
+			$search_file_path    = $this->convert_to_local_path( $decoded_image_url );
+			$search_console      = ConsoleColor::white( 'Path:' )->bright_white( $search_file_path )->white( 'Filename:' )->bright_white( $decoded_filename );
+			$maybe_attachment_id = $this->attachments->maybe_get_existing_attachment_id( $this->convert_to_local_path( $decoded_image_url ), $decoded_filename );
+
+			if ( null === $maybe_attachment_id ) {
+				$search_console->white( '❌' )->output();
+
+				ConsoleColor::bright_blue( 'Size Suffix Removed' )->output();
+				$size_suffix_removed_filename  = preg_replace( '/-\d+x\d+\./', '.', $decoded_filename );
+				$size_suffix_removed_image_url = preg_replace( '/-\d+x\d+\./', '.', $decoded_image_url );
+				$search_file_path              = $this->convert_to_local_path( $size_suffix_removed_image_url );
+				$search_console                = ConsoleColor::white( 'Path:' )->bright_white( $search_file_path )->white( 'Filename:' )->bright_white( $size_suffix_removed_filename );
+				$maybe_attachment_id           = $this->attachments->maybe_get_existing_attachment_id( $search_file_path, $size_suffix_removed_filename );
+			}
+
+			if ( null === $maybe_attachment_id ) {
+				$search_console->white( '❌' )->output();
+
+				ConsoleColor::bright_blue( 'Scaled Filename' )->output();
+				$just_filename       = preg_replace( '/(-\d+x\d+)$/', '', pathinfo( $decoded_filename, PATHINFO_FILENAME ) );
+				$just_extension      = pathinfo( $decoded_filename, PATHINFO_EXTENSION );
+				$scaled_filename     = $just_filename . '-scaled.' . $just_extension;
+				$scaled_image_url    = str_replace( $decoded_filename, $scaled_filename, $decoded_image_url );
+				$search_file_path    = $this->convert_to_local_path( $scaled_image_url );
+				$search_console      = ConsoleColor::white( 'Path:' )->bright_white( $search_file_path )->white( 'Filename:' )->bright_white( $scaled_filename );
+				$maybe_attachment_id = $this->attachments->maybe_get_existing_attachment_id( $search_file_path, $scaled_filename );
+			}
+
+			if ( null === $maybe_attachment_id ) {
+				$search_console->white( '❌' )->output();
+
+				ConsoleColor::bright_blue( 'Regexp Search' )->output();
+				$just_filename       = pathinfo( $decoded_filename, PATHINFO_FILENAME );
+				$just_extension      = pathinfo( $decoded_filename, PATHINFO_EXTENSION );
+				$regexp_filename     = preg_replace( '/(-scaled\d+)|(-\d+x\d+)/', '', $just_filename ) . '.' . $just_extension;
+				$regexp_path         = str_replace( $decoded_filename, $regexp_filename, $this->convert_to_local_path( $decoded_image_url ) );
+				$regexp_partial_path = str_replace( trailingslashit( wp_upload_dir()['basedir'] ), '', $regexp_path );
+				$regexp_partial_path = str_replace( ".$just_extension", '', $regexp_partial_path );
+				$reg_exp             = "$regexp_partial_path(.+)?\.$just_extension";
+				$search_console      = ConsoleColor::white( 'Path:' )->bright_white( $regexp_partial_path )->white( 'Filename:' )->bright_white( $regexp_filename );
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$maybe_attachment_id = (int) $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT p.ID 
+							FROM $wpdb->posts p 
+							    INNER JOIN $wpdb->postmeta pm ON p.ID = pm.post_id 
+            				WHERE p.post_type = 'attachment' 
+            				  AND pm.meta_key = '_wp_attached_file' 
+            				  AND pm.meta_value REGEXP %s",
+						$reg_exp
+					)
+				);
+			}
+
+			if ( null === $maybe_attachment_id || 0 === $maybe_attachment_id ) {
+				$search_console->white( '❌' )->output();
+				ConsoleColor::red( 'No attachment found.' )->output();
+				continue;
+			}
+
+			if ( is_int( $maybe_attachment_id ) ) {
+				$search_console->white( '✅' )->green( 'Attachment ID:' )->bright_green( $maybe_attachment_id )->output();
+				$attachment_url = wp_get_attachment_url( $maybe_attachment_id );
+
+				preg_match( '/(-\d+x\d+)$/', pathinfo( $decoded_filename, PATHINFO_FILENAME ), $matches );
+
+				if ( ! empty( $matches ) ) {
+					$size_suffix               = $matches[0];
+					$attachment_filename       = basename( $attachment_url );
+					$attachment_file_extension = pathinfo( $attachment_filename, PATHINFO_EXTENSION );
+					$attachment_url            = str_replace( ".{$attachment_file_extension}", $size_suffix . '.' . $attachment_file_extension, $attachment_url );
+				}
+
+				if ( str_contains( $image_url, 'sites/11' ) ) {
+					$image_url = str_replace( 'sites/11/', '', $image_url );
+				}
+
+				$console = ConsoleColor::green( 'Attachment URL:' )->bright_green( $attachment_url );
+				if ( $image_url === $attachment_url ) {
+					$console->bright_white( 'No change needed.' )->output();
+					continue;
+				}
+
+				$console->output();
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$replaced = $wpdb->query(
+					$wpdb->prepare(
+						"UPDATE $wpdb->posts SET post_content = REPLACE(post_content, %s, %s) WHERE ID = %d",
+						$image_url,
+						$attachment_url,
+						$row['post_id']
+					)
+				);
+
+				if ( ! $replaced ) {
+					ConsoleColor::red( 'Error replacing image URL.' )->output();
+					ConsoleColor::white( $wpdb->last_query )->output();
+				} else {
+					ConsoleColor::green( 'Image URL replaced.' )->output();
+				}
+			}
+		}
+	}
+
+	/**
 	 * Retrieve the post permalink from the API.
 	 *
 	 * @param int   $post_id The post ID.
@@ -575,6 +876,68 @@ class TheParkRecordMigrator implements InterfaceCommand {
 		}
 
 		return $post['link'] ?? '';
+	}
+
+	/**
+	 * Retrieves the full size source URL for an attachment.
+	 *
+	 * @param int    $attachment_id The attachment ID.
+	 * @param string $credentials The credentials to use for the request.
+	 *
+	 * @return array|WP_Error
+	 */
+	public function get_attachment_info_from_source( int $attachment_id, string $credentials = '' ): array|WP_Error {
+		$args = [];
+
+		if ( ! empty( $credentials ) ) {
+			$args['headers']['Authorization'] = 'Basic ' . base64_encode( $credentials ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+		}
+
+		$attachment = json_decode( wp_remote_retrieve_body( wp_remote_get( self::API_URL_MEDIA . '/' . $attachment_id, $args ) ), true );
+
+		if ( empty( $attachment ) ) {
+			return new WP_Error( 'empty_response', 'No attachment data returned.' );
+		}
+
+		if ( isset( $attachment['data']['status'] ) && $attachment['data']['status'] >= 400 ) {
+			return new WP_Error( 'bad_response', 'Bad response from API.' );
+		}
+
+		return [
+			'wp_url'               => $attachment['guid']['rendered'],
+			'uploads_path'         => $attachment['media_details']['file'], // '2021/06/file.jpg'
+			'full_size_source_url' => $attachment['media_details']['sizes']['full']['source_url'] ?? '',
+		];
+	}
+
+	/**
+	 * Gets the originak post ID.
+	 *
+	 * @param int $post_id The post ID.
+	 *
+	 * @return int
+	 */
+	public function get_original_post_id( int $post_id ): int {
+		$original_post_id = get_post_meta( $post_id, self::ORIGINAL_POST_ID_META, true );
+
+		if ( empty( $original_post_id ) ) {
+			return $post_id;
+		}
+
+		return intval( $original_post_id );
+	}
+
+	/**
+	 * Converts the image URL to a local path.
+	 *
+	 * @param string $image_url The image URL.
+	 *
+	 * @return string
+	 */
+	public function convert_to_local_path( string $image_url ): string {
+		$path = wp_parse_url( $image_url, PHP_URL_PATH );
+
+		return $this->get_home_path() . str_replace( 'sites/11/', '', $path );
 	}
 
 	/**
@@ -709,5 +1072,14 @@ class TheParkRecordMigrator implements InterfaceCommand {
 		}
 
 		return $posts;
+	}
+
+	/**
+	 * Get the home path.
+	 *
+	 * @return string
+	 */
+	private function get_home_path(): string {
+		return str_replace( '/wp-content/uploads', '', wp_upload_dir()['basedir'] );
 	}
 }
