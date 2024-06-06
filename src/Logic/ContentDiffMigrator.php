@@ -3093,9 +3093,12 @@ class ContentDiffMigrator {
 	 */
 	public function filter_for_different_collated_tables( string $table_prefix, array $skip_tables = [] ): array {
 		$collation_comparison = $this->get_collation_comparison_of_live_and_core_wp_tables( $table_prefix, $skip_tables );
-		return array_filter(
-			$collation_comparison,
-			fn( $validated_table ) => false === $validated_table['match_bool']
+
+		return array_values(
+			array_filter(
+				$collation_comparison,
+				fn( $validated_table ) => false === $validated_table['match_bool']
+			)
 		);
 	}
 
