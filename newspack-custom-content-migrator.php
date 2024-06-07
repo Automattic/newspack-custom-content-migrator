@@ -96,3 +96,11 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\TheFifthEstateMigrator::class,
 	)
 );
+
+add_action( 'newspack_migration_tools_log', function ( $filename, $message, $level, $exit_on_error ) {
+	static $logger = null;
+	if ( is_null( $logger ) ) {
+		$logger = new Utils\Logger();
+	}
+	$logger->log( $filename, $message, $level, $exit_on_error );
+}, 10, 4 );

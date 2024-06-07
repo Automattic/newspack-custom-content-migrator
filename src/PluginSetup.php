@@ -3,6 +3,7 @@ declare(ticks=1);
 
 namespace NewspackCustomContentMigrator;
 
+use Newspack\MigrationTools\Command\AttachmentsMigrator;
 use Newspack\MigrationTools\Command\WpCliCommandInterface;
 use Newspack\MigrationTools\Command\WpCliCommands;
 use WP_CLI;
