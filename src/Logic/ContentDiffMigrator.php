@@ -2758,7 +2758,7 @@ class ContentDiffMigrator {
 			]
 		);
 
-		return $this->wpdb->insert_id;
+		return $new_user_id;
 	}
 
 	/**
