@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.blog/
  * Author:      Automattic
  * Author URI:  https://newspack.blog/
- * Version:     1.5.3
+ * Version:     1.5.4
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -78,6 +78,7 @@ PluginSetup::register_migrators(
 		Command\General\MediaCreditPluginMigrator::class,
 		Command\General\SimplyGuestAuthorNameMigrator::class,
 		Command\General\TagDivThemesPluginsMigrator::class,
+		Command\General\GhostCMSMigrator::class,
 
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\SoccerAmericaMigrator::class,
