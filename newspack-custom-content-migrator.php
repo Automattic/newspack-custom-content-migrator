@@ -22,6 +22,7 @@ require_once ABSPATH . 'wp-settings.php';
 
 PluginSetup::configure_error_reporting();
 PluginSetup::register_ticker();
+PluginSetup::add_hooks();
 PluginSetup::register_migrators(
 	array(
 		// General.
@@ -97,10 +98,3 @@ PluginSetup::register_migrators(
 	)
 );
 
-add_action( 'newspack_migration_tools_log', function ( $filename, $message, $level, $exit_on_error ) {
-	static $logger = null;
-	if ( is_null( $logger ) ) {
-		$logger = new Utils\Logger();
-	}
-	$logger->log( $filename, $message, $level, $exit_on_error );
-}, 10, 4 );

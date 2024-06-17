@@ -133,4 +133,33 @@ class PluginSetup {
 			}
 		}
 	}
+
+	/**
+	 * Add hooks for all commands.
+	 *
+	 * Note that to add a hook for a specific command, you should add it in the command class in the command (not the constructor).
+	 * That way it only applies to that command/publisher when run.
+	 *
+	 * @return void
+	 */
+	public static function add_hooks(): void {
+		add_action( 'newspack_migration_tools_log', [ __CLASS__, 'action_log' ], 10, 4 );
+	}
+
+	/**
+	 * @param string $filename Filename to log to.
+	 * @param string $message Message to log.
+	 * @param string $level Log level - see constants in Logger class.
+	 * @param bool $exit_on_error If true, will exit the script on error.
+	 *
+	 * @return void
+	 */
+	public static function action_log( $filename, $message, $level, $exit_on_error ): void {
+		static $logger = null;
+		if ( is_null( $logger ) ) {
+			$logger = new Utils\Logger();
+		}
+		$logger->log( $filename, $message, $level, $exit_on_error );
+	}
+
 }
