@@ -15,7 +15,7 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
-use \NewspackCustomContentMigrator\Utils\Logger;
+use NewspackCustomContentMigrator\Utils\Logger;
 use WP_Post;
 
 /**
@@ -71,7 +71,7 @@ class GutenbergBlockGenerator {
 			' ',
 			array_filter(
 				array_map(
-					function( $index, $attachment_id ) use ( &$tile_sizes, &$non_existing_attachment_indexes, $tile_sizes_list ) {
+					function ( $index, $attachment_id ) use ( &$tile_sizes, &$non_existing_attachment_indexes, $tile_sizes_list ) {
 						$attachment_url = wp_get_attachment_url( $attachment_id );
 
 						if ( ! $attachment_url ) {
@@ -819,7 +819,7 @@ HTML;
 				'type'             => 'rich',
 				'providerNameSlug' => 'twitter',
 				'responsive'       => true,
-				'className'        => $class_names
+				'className'        => $class_names,
 			],
 			'innerBlocks'  => [],
 			'innerHTML'    => $block_content,
@@ -946,6 +946,26 @@ HTML;
 	}
 
 	/**
+	 * Generate an audio block.
+	 *
+	 * @param int $attachment_post_id Attachment post ID.
+	 *
+	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
+	 */
+	public function get_audio( $attachment_post_id ) {
+		$attachment_url = wp_get_attachment_url( $attachment_post_id );
+		$inner_html     = '<figure class="wp-block-audio"><audio controls src="' . $attachment_url . '"></audio></figure>';
+
+		return [
+			'blockName'    => 'core/audio',
+			'attrs'        => [ 'id' => $attachment_post_id ],
+			'innerBlocks'  => [],
+			'innerHTML'    => $inner_html,
+			'innerContent' => [ $inner_html ],
+		];
+	}
+
+	/**
 	 * Generate tile size based on its index.
 	 *
 	 * @param int      $index Tile size.
@@ -1042,5 +1062,4 @@ HTML;
 			'innerContent' => [],
 		];
 	}
-
 }
