@@ -2,9 +2,11 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \WP_CLI;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
+use WP_CLI;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
+use NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
+use NewspackCustomContentMigrator\Utils\Logger;
 
 /**
  * Custom migration scripts for East Mojo.
@@ -22,10 +24,22 @@ class EastMojoMigrator implements InterfaceCommand {
 	private $attachments_logic;
 
 	/**
+	 * Logger.
+	 */
+	private Logger $logger;
+
+	/**
+	 * @var PostsLogic
+	 */
+	private $posts_logic;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
+		$this->logger            = new Logger();
 		$this->attachments_logic = new AttachmentsLogic();
+		$this->posts_logic       = new PostsLogic();
 	}
 
 	/**
@@ -36,7 +50,7 @@ class EastMojoMigrator implements InterfaceCommand {
 	public static function get_instance() {
 		$class = get_called_class();
 		if ( null === self::$instance ) {
-			self::$instance = new $class;
+			self::$instance = new $class();
 		}
 
 		return self::$instance;
@@ -59,6 +73,23 @@ class EastMojoMigrator implements InterfaceCommand {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'Perform a dry run, making no changes.',
+						'optional'    => true,
+					],
+				],
+
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator eastmojo-cleanup-broken-images-in-post-content',
+			[ $this, 'cmd_cleanup_broken_images_in_post_content' ],
+			[
+				'shortdesc' => 'Scans all content for broken images, and tries to remove the whole block around them.',
+				'synopsis'  => [
 					[
 						'type'        => 'flag',
 						'name'        => 'dry-run',
@@ -96,7 +127,7 @@ class EastMojoMigrator implements InterfaceCommand {
 		}
 
 		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
-		$post_id = isset( $assoc_args[ 'post-id' ] ) ? (int) $assoc_args['post-id'] : null;
+		$post_id = isset( $assoc_args['post-id'] ) ? (int) $assoc_args['post-id'] : null;
 
 		global $wpdb;
 		$time_start = microtime( true );
@@ -119,12 +150,14 @@ class EastMojoMigrator implements InterfaceCommand {
 			}
 		} else {
 			// Loop through posts detecting images hosted in the AWS bucket.
-			$query_public_posts = new \WP_Query( [
-				'posts_per_page' => -1,
-				'post_type'      => [ 'post', 'page' ],
-				'post_status'    => 'publish',
-				's'              => sprintf( '://%s/%s', $img_host, $img_path ),
-			] );
+			$query_public_posts = new \WP_Query(
+				[
+					'posts_per_page' => -1,
+					'post_type'      => [ 'post', 'page' ],
+					'post_status'    => 'publish',
+					's'              => sprintf( '://%s/%s', $img_host, $img_path ),
+				] 
+			);
 			if ( ! $query_public_posts->have_posts() ) {
 				WP_CLI::line( 'No Posts with images found.' );
 				exit;
@@ -212,6 +245,126 @@ class EastMojoMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Scans all content for broken images, and tries to remove the whole block around them.
+	 */
+	public function cmd_cleanup_broken_images_in_post_content( array $args, array $assoc_args ): void {
+		global $wpdb;
+
+		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
+
+		// Logs.
+		$log = sprintf( 'eastmojo-cleanup-broken-images-from-post-content-%s.txt', date( 'Y-m-d H-i-s' ) );
+
+		// CSV
+		$csv              = sprintf( 'eastmojo-broken-images-cleanup-%s.csv', date( 'Y-m-d H-i-s' ) );
+		$csv_file_pointer = fopen( $csv, 'w' );
+		fputcsv(
+			$csv_file_pointer,
+			[
+				'#',
+				'Post ID',
+				'Status',
+				'Post Title',
+				'Slug',
+				'Live URL',
+				'Staging URL',
+			] 
+		);
+
+		$posts_ids    = $this->posts_logic->get_all_posts_ids( 'post' );
+		$posts_chunks = array_chunk( $posts_ids, 500 );
+
+		$progress_bar = WP_CLI\Utils\make_progress_bar( 'Iterating Posts', count( $posts_ids ), 1 );
+
+		$index = 0;
+
+		foreach ( $posts_chunks as $chunk_index => $posts_chunk ) {
+			$this->logger->log( $log, sprintf( 'Start Processing Chunk %d / %d', $chunk_index + 1, count( $posts_chunks ) ), false );
+
+			$posts = get_posts(
+				[
+					'post_type'              => 'post',
+					'post_status'            => 'any',
+					'include'                => $posts_chunk,
+					'cache_results'          => false,
+					'update_post_term_cache' => false,
+					'update_post_meta_cache' => false,
+				] 
+			);
+
+			foreach ( $posts as $post ) {
+				++$index;
+				$status = 'NONE';
+
+				$this->logger->log( $log, sprintf( 'Start Processing Post %d / %d', $index, count( $posts_ids ) ), false );
+
+				// 1. Process Post with broken images.
+				if ( stripos( $post->post_content, 'gumlet.assettype.com' ) !== false ) {
+					$this->logger->log( $log, 'Found broken image', false );
+
+					$replaced_post_content = preg_replace( '~<figure>.?<img src\="https?:\/\/gumlet\.assettype\.com.+\".+<\/figure>~U', '', $post->post_content );
+					$replaced_post_content = preg_replace( '~<img src\="https?:\/\/gumlet\.assettype\.com.+\"\s?\/?>~', '', $replaced_post_content );
+				
+					file_put_contents( 'migration/' . $post->ID . '-before.txt', $post->post_content );
+					file_put_contents( 'migration/' . $post->ID . '-after.txt', $replaced_post_content );
+
+					if ( ! $dry_run ) {
+						$updated_result = $wpdb->update(
+							$wpdb->prefix . 'posts',
+							[
+								'post_content' => $replaced_post_content,
+							],
+							[
+								'ID' => $post->ID,
+							]
+						);
+
+						if ( $updated_result === false ) {
+							$status = 'ERROR';
+
+							$this->logger->log( $log, sprintf( 'Couldn\'t update post #%d. Error: %s', $post->ID, $wpdb->last_error ), Logger::ERROR );
+						} else {
+							$status = 'UPDATED';
+
+							$this->logger->log( $log, sprintf( 'Successfully updated post #%d', $post->ID ), false );
+						}
+					}
+				}
+
+				// 2. Populate CSV.
+				if ( $status !== 'NONE' ) {
+					$this->logger->log( $log, 'Populating CSV', false );
+	
+					fputcsv(
+						$csv_file_pointer,
+						[
+							$index, // #
+							$post->ID, // ID.
+							$status, // Status.
+							$post->post_title, // Post Title.
+							$post->post_name, // Post Slug.
+							str_replace( home_url(), 'https://eastmojo.com', get_permalink( $post->ID ) ), // Live URL.
+							get_permalink( $post->ID ), // Staging URL.
+						]
+					);
+				}
+
+				$progress_bar->tick( 1, sprintf( '[Memory: %s] Cleaning up broken images %d / %d', size_format( memory_get_usage( true ) ), $index, count( $posts_ids ) ) );
+			}
+		}
+		
+		$progress_bar->finish();
+
+		fclose( $csv_file_pointer );
+
+		WP_CLI::success( sprintf( 'Done. See %s', $log ) );
+
+		if ( $dry_run ) {
+			WP_CLI::warning( 'Dry mode, no changes have been made!' );
+		}
+	}
+
+	/**
 	 * Gets filename from a URL or a path.
 	 *
 	 * @param string $path URL or path.
@@ -220,8 +373,8 @@ class EastMojoMigrator implements InterfaceCommand {
 	 */
 	private function get_filename_from_path( $path ) {
 		$pathinfo = pathinfo( $path );
-		return ( isset( $pathinfo[ 'filename' ] ) && isset( $pathinfo[ 'extension' ] ) )
-			? $pathinfo[ 'filename' ] . '.' . $pathinfo[ 'extension' ]
+		return ( isset( $pathinfo['filename'] ) && isset( $pathinfo['extension'] ) )
+			? $pathinfo['filename'] . '.' . $pathinfo['extension']
 			: null;
 	}
 
@@ -235,7 +388,7 @@ class EastMojoMigrator implements InterfaceCommand {
 	private function get_path_from_url( $url ) {
 		$url_parse = wp_parse_url( $url );
 
-		return $url_parse[ 'path' ];
+		return $url_parse['path'];
 	}
 
 	/**
@@ -248,7 +401,7 @@ class EastMojoMigrator implements InterfaceCommand {
 	 * @return array|null If matches found, returns $matches as set by the preg_match_all(), otherwise null.
 	 */
 	private function match_attribute_with_hostname( $attribute, $source, $hostname ) {
-		$pattern = sprintf(
+		$pattern               = sprintf(
 			'|
 				%s="        # attribute opening
 				(https?://  # start full image URL match with http or https
@@ -259,7 +412,7 @@ class EastMojoMigrator implements InterfaceCommand {
 			$attribute,
 			$hostname
 		);
-		$matches = [];
+		$matches               = [];
 		$preg_match_all_result = preg_match_all( $pattern, $source, $matches );
 
 		return ( 0 === $preg_match_all_result || false === $preg_match_all_result )
@@ -274,8 +427,8 @@ class EastMojoMigrator implements InterfaceCommand {
 	 * @return string
 	 */
 	private function get_site_public_path() {
-		if ( defined ( 'WP_CONTENT_DIR' ) ) {
-			return realpath( WP_CONTENT_DIR . "/.." );
+		if ( defined( 'WP_CONTENT_DIR' ) ) {
+			return realpath( WP_CONTENT_DIR . '/..' );
 		}
 
 		return rtrim( get_home_path(), '/' );
