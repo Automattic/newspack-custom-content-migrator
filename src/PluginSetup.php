@@ -3,7 +3,6 @@ declare(ticks=1);
 
 namespace NewspackCustomContentMigrator;
 
-use Newspack\MigrationTools\Command\AttachmentsMigrator;
 use Newspack\MigrationTools\Command\WpCliCommandInterface;
 use Newspack\MigrationTools\Command\WpCliCommands;
 use WP_CLI;
@@ -143,26 +142,26 @@ class PluginSetup {
 	 * @return void
 	 */
 	public static function add_hooks(): void {
-		// Disable the simple file logging the migration tools use.
-		add_filter('newspack_migration_tools_log_disable_default', '__return_true' );
-		// And use our fancy logger instead.
-		add_action( 'newspack_migration_tools_log', [ __CLASS__, 'action_log' ], 10, 4 );
+		// Disable the simple CLI logging from the migration tools and use WP_CLI's version.
+		add_filter('newspack_migration_tools_log_clilog_disable', '__return_true' );
+
+		// And use our fancy WP_CLI logger instead.
+		add_action( 'newspack_migration_tools_cli_log', [ __CLASS__, 'action_cli_log' ], 10, 3 );
 	}
 
 	/**
-	 * @param string $filename Filename to log to.
 	 * @param string $message Message to log.
 	 * @param string $level Log level - see constants in Logger class.
 	 * @param bool $exit_on_error If true, will exit the script on error.
 	 *
 	 * @return void
 	 */
-	public static function action_log( $filename, $message, $level, $exit_on_error ): void {
+	public static function action_cli_log( string $message, string $level, bool $exit_on_error ): void {
 		static $logger = null;
 		if ( is_null( $logger ) ) {
 			$logger = new Utils\Logger();
 		}
-		$logger->log( $filename, $message, $level, $exit_on_error );
+		$logger->wp_cli_log( $message, $level, $exit_on_error );
 	}
 
 }

@@ -21,3 +21,5 @@ yarn-error.log*
 
 /vendor/
 release
+# for symlinking from the vendor folder
+dev/
