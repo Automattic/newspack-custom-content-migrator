@@ -53,7 +53,7 @@ class Logger {
 	public function log( $file, $message, string $level = Log::LINE, bool $exit_on_error = false ): void {
 		$level = strtoupper( $level ); // Upper case for backwards compatibility.
 		FileLogger::log( $file, $message, $level, $exit_on_error );
-		$this->wp_cli_log( $message, $level );
+		$this->wp_cli_log( $message, $level, $exit_on_error );
 	}
 
 	/**
