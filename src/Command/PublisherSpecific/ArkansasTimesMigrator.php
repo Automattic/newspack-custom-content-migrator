@@ -170,7 +170,7 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 							'_newspack_issue_number'       => get_post_meta( $issue_source_id, 'issue_number', true ),
 							'_newspack_issue_digital_url'  => get_post_meta( $issue_source_id, 'digital_edition_url', true ),
 
-							'_thumbnail_id'                => get_post_meta( $issue_source_id, 'cover_image', true ),
+							'_thumbnail_id'                => get_post_meta( $issue_source_id, '_thumbnail_id', true ),
 						],
 					],
 					true 
