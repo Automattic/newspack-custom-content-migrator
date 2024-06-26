@@ -8,6 +8,7 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
@@ -27,11 +28,17 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 	private Posts $posts_logic;
 
 	/**
+	 * @var GutenbergBlockGenerator
+	 */
+	private GutenbergBlockGenerator $block_generator;
+
+	/**
 	 * Private constructor.
 	 */
 	private function __construct() {
-		$this->logger      = new Logger();
-		$this->posts_logic = new Posts();
+		$this->logger          = new Logger();
+		$this->posts_logic     = new Posts();
+		$this->block_generator = new GutenbergBlockGenerator();
 	}
 
 	/**
@@ -67,22 +74,30 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 				'shortdesc' => 'Migrates Attachments media credits from ACF to Newspack Plugin',
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator arkansastimes-migrate-youtube-embeds',
+			[ $this, 'cmd_migrate_youtube_embeds' ],
+			[
+				'shortdesc' => 'Migrates YouTube Embeds from paragraph blocks to YouTube Embed blocks',
+			]
+		);
 	}
 
-	/** 
+	/**
 	 * Migrates Issues from CPT to Regular Posts with Issues Category.
 	 */
 	public function cmd_migrate_issues_from_cpt_to_posts(): void {
 		// Logs.
 		$log = 'arkansastimes-issues-cpt-to-posts.log';
-	  
+
 		// Preparations.
 		$default_wp_author_user    = get_user_by( 'login', 'adminnewspack' );
 		$default_wp_author_user_id = $default_wp_author_user->ID;
 
 		$issue_category_id = $this->maybe_create_issues_category();
 		$issues_source_ids = $this->posts_logic->get_all_posts_ids( 'issue' );
-		
+
 		// CSV.
 		$csv              = sprintf( 'arkansastimes-issues-%s.csv', date( 'Y-m-d H-i-s' ) );
 		$csv_file_pointer = fopen( $csv, 'w' );
@@ -96,7 +111,7 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 				'Issue Title',
 				'Issue Post ID',
 				'Issue URL',
-			] 
+			]
 		);
 
 		$progress_bar = WP_CLI\Utils\make_progress_bar( 'Migrating Issues', count( $issues_source_ids ), 1 );
@@ -120,12 +135,12 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 					'order'          => 'ASC',
 					'meta_key'       => '_newspack_issue_source_id',
 					'meta_value'     => $issue_source_id,
-				] 
+				]
 			);
 
 			if ( count( $issue_posts ) > 0 ) {
 				$issue_post = $issue_posts[0];
-				$post_id = $issue_post->ID;
+				$post_id    = $issue_post->ID;
 
 				if ( empty( $issue_post->post_content ) ) {
 					// 1.1. Post already exists, but content needs population.
@@ -133,18 +148,22 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 
 					$status = 'UPDATED';
 
-					$issue_post_content_updated = $this->get_generated_issue_post_content( [
-						'title' => get_post_meta( $issue_source_id, 'title', true ),
-						'release_date' => get_post_meta( $issue_source_id, 'release_date', true ),
-						'volume' => get_post_meta( $issue_source_id, 'issue_volume', true ),
-						'number' => get_post_meta( $issue_source_id, 'issue_number', true ),
-						'url' => get_post_meta( $issue_source_id, 'digital_edition_url', true ),
-					] );
+					$issue_post_content_updated = $this->get_generated_issue_post_content(
+						[
+							'title'        => get_post_meta( $issue_source_id, 'title', true ),
+							'release_date' => get_post_meta( $issue_source_id, 'release_date', true ),
+							'volume'       => get_post_meta( $issue_source_id, 'issue_volume', true ),
+							'number'       => get_post_meta( $issue_source_id, 'issue_number', true ),
+							'url'          => get_post_meta( $issue_source_id, 'digital_edition_url', true ),
+						]
+					);
 
-					wp_update_post( [
-						'ID' => $post_id,
-						'post_content' => $issue_post_content_updated,
-					] );
+					wp_update_post(
+						[
+							'ID'           => $post_id,
+							'post_content' => $issue_post_content_updated,
+						]
+					);
 				} else {
 					// 1.2. Post already exists.
 					$this->logger->log( $log, 'Post already exists. Skipping...' );
@@ -173,7 +192,7 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 							'_thumbnail_id'                => get_post_meta( $issue_source_id, '_thumbnail_id', true ),
 						],
 					],
-					true 
+					true
 				);
 
 				if ( is_wp_error( $post_id ) ) {
@@ -200,7 +219,7 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 					$issue_source_post->post_title, // Issue Title.
 					$post_id, // Issue Post ID.
 					get_permalink( $post_id ), // Issue New Post ID.
-				] 
+				]
 			);
 
 			$progress_bar->tick( 1, sprintf( '[Memory: %s]', size_format( memory_get_usage( true ) ) ) );
@@ -245,7 +264,7 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 				'Media Credit 5 URL',
 				'Media Credits Value',
 				'Media Credits URL Value',
-			] 
+			]
 		);
 
 		$progress_bar = WP_CLI\Utils\make_progress_bar( 'Migrating Attachments Media Credits', count( $attachments_ids ), 1 );
@@ -305,7 +324,7 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 
 			// Set flag for replaced metas.
 			add_post_meta( $attachment_id, 'newspack_metas_replaced', 'yes' );
-			
+
 			$this->logger->log( $log, sprintf( 'Store meta keys as legacy #%d', $attachment_id ) );
 
 			// Store the Media Credits.
@@ -323,10 +342,10 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 
 			// Set flag for updated Newspack Plugin Media Credits fields.
 			add_post_meta( $attachment_id, 'newspack_metas_updated_media_credits', 'yes' );
-			
+
 			// 2. Populate CSV.
 			$this->logger->log( $log, 'Populating CSV' );
-			
+
 			fputcsv(
 				$csv_file_pointer,
 				[
@@ -346,7 +365,7 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 					get_post_meta( $attachment_id, 'acf_media_credit_4_credit_link', true ), // Media Credit 5 URL.
 					get_post_meta( $attachment_id, '_media_credit', true ), // Media Credits Value.
 					get_post_meta( $attachment_id, '_media_credit_url', true ), // Media Credits URL Value.
-				] 
+				]
 			);
 
 			$progress_bar->tick( 1, sprintf( '[Memory: %s]', size_format( memory_get_usage( true ) ) ) );
@@ -360,7 +379,75 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 		WP_CLI::success( sprintf( 'Done. See %s', $log ) );
 	}
 
-	/** 
+	/**
+	 * Migrates YouTube Embeds from paragraph blocks to YouTube Embed blocks.
+	 */
+	public function cmd_migrate_youtube_embeds() {
+		// Logs.
+		$log = 'arkansastimes-migrate-youtube-embeds.log';
+
+		$this->logger->log( $log, sprintf( 'Start processing posts %s', date( 'Y-m-d H:I:s' ) ) );
+
+		// Get all post that contains a YouTube iframe in post_content.
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'post',
+				'posts_per_page' => -1,
+				'post_status'    => 'publish',
+				's'              => 'youtube.com',
+			]
+		);
+
+		$posts = $query->posts;
+
+		foreach ( $posts as $index => $post ) {
+			$this->logger->log( $log, sprintf( '(%d/%d) Processing Post #%d', $index + 1, count( $posts ), $post->ID ) );
+
+			$content_blocks = parse_blocks( $post->post_content );
+
+			foreach ( $content_blocks as $block_index => $block ) {
+				if ( 'core/paragraph' === $block['blockName'] ) {
+					$paragraph_content = $block['innerHTML'];
+
+					if ( strpos( $paragraph_content, 'youtube.com' ) !== false ) {
+						// The YouTube iframe can be wrapped in a paragraph tag, or not.
+						// Regex to get the iframe src, and make sure there is only the iframe inside the paragraph and no other content.
+						$pattern = '/<p>(<iframe.*?src="(.+?)".*?<\/iframe>)<\/p>/s';
+						preg_match( $pattern, $paragraph_content, $matches );
+
+						if ( ! empty( $matches ) ) {
+							$src = $matches[2];
+
+							// Replace the paragraph block with a YouTube Embed block.
+							$youtube_block                  = $this->block_generator->get_youtube( $src );
+							$content_blocks[ $block_index ] = $youtube_block;
+						} else {
+							WP_CLI::warning( sprintf( 'No iframe found in paragraph block #%d', $post->ID ) );
+						}
+					}
+				}
+			}
+
+			$updated_content = serialize_blocks( $content_blocks );
+
+			if ( $updated_content !== $post->post_content ) {
+				wp_update_post(
+					[
+						'ID'           => $post->ID,
+						'post_content' => $updated_content,
+					]
+				);
+
+				$this->logger->log( $log, sprintf( 'Post #%d updated', $post->ID ) );
+			} else {
+				$this->logger->log( $log, sprintf( 'Post #%d not updated', $post->ID ) );
+			}
+		}
+
+		WP_CLI::success( sprintf( 'Done. See %s', $log ) );
+	}
+
+	/**
 	 * Check if Issues category exist and creates if it doesn't.
 	 * Returns the Category Issues term_id.
 	 */
@@ -394,23 +481,23 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 				<h4 class="wp-block-heading has-text-align-center"><?php echo esc_html( $args['title'] ); ?></h4>
 				<!-- /wp:heading -->
 			<?php endif; ?>
-		
+
 			<?php if ( $args['release_date'] ) : ?>
 				<!-- wp:paragraph {"align":"center"} -->
 				<p class="has-text-align-center"><?php echo date( 'F j, Y', strtotime( $args['release_date'] ) ); ?></p>
 				<!-- /wp:paragraph -->
 			<?php endif; ?>
-		
+
 			<!-- wp:separator -->
 			<hr class="wp-block-separator has-alpha-channel-opacity"/>
 			<!-- /wp:separator -->
-		
+
 			<?php if ( ! empty( $issue_sequence ) ) : ?>
 				<!-- wp:heading {"textAlign":"center","level":5} -->
 				<h5 class="wp-block-heading has-text-align-center"><?php echo implode( ' » ', $issue_sequence ); ?></h5>
 				<!-- /wp:heading -->
 			<?php endif; ?>
-		
+
 			<?php if ( ! empty( $args['url'] ) ) : ?>
 				<!-- wp:buttons {"layout":{"type":"flex","justifyContent":"center"}} -->
 				<div class="wp-block-buttons">
