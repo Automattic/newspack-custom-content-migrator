@@ -7,7 +7,9 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use NewspackCustomContentMigrator\Logic\ContentDiffMigrator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
@@ -16,6 +18,11 @@ use WP_CLI;
  * Custom migration scripts for Arkansas Times.
  */
 class ArkansasTimesMigrator implements InterfaceCommand {
+	/**
+	 * CoAuthorPlus.
+	 */
+	private ContentDiffMigrator $content_diff_migrator;
+
 	/**
 	 * Logger.
 	 */
@@ -27,11 +34,20 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 	private Posts $posts_logic;
 
 	/**
+	 * Gutenberg Block Generator Logic.
+	 */
+	private GutenbergBlockGenerator $gutenberg_block_generator;
+
+	/**
 	 * Private constructor.
 	 */
 	private function __construct() {
-		$this->logger      = new Logger();
-		$this->posts_logic = new Posts();
+		global $wpdb;
+
+		$this->content_diff_migrator     = new ContentDiffMigrator( $wpdb );
+		$this->logger                    = new Logger();
+		$this->posts_logic               = new Posts();
+		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
 	}
 
 	/**
@@ -65,6 +81,33 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 			[ $this, 'cmd_migrate_attachments_media_credits' ],
 			[
 				'shortdesc' => 'Migrates Attachments media credits from ACF to Newspack Plugin',
+			]
+		);
+
+		/**
+		 * Content Refresh Fixes
+		 */
+		WP_CLI::add_command(
+			'newspack-content-migrator arkansastimes-content-refresh-cap-terms',
+			[ $this, 'cmd_content_refresh_cap_terms' ],
+			[
+				'shortdesc' => 'Runs a Content Refresh for Co-Authors Plus plugin',
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator arkansastimes-content-refresh-cap-posts',
+			[ $this, 'cmd_content_refresh_cap_posts' ],
+			[
+				'shortdesc' => 'Runs a Content Refresh for Posts and Co-Authors Plus plugin',
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator arkansastimes-content-refresh-fix-attachments-reference-to-live-db',
+			[ $this, 'cmd_content_refresh_fix_attachments_reference_to_live_db' ],
+			[
+				'shortdesc' => 'Runs a fix for Attachments Reference to live DB after content refresh',
 			]
 		);
 	}
@@ -101,7 +144,7 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 
 		$progress_bar = WP_CLI\Utils\make_progress_bar( 'Migrating Issues', count( $issues_source_ids ), 1 );
 
-		$this->logger->log( $log, sprintf( 'Start processing posts %s', date( 'Y-m-d H:I:s' ) ) );
+		$this->logger->log( $log, sprintf( 'Start processing posts %s', date( 'Y-m-d H:i:s' ) ) );
 
 		// Migrate Issues to Posts with Issues Category.
 		foreach ( $issues_source_ids as $index => $issue_source_id ) {
@@ -250,7 +293,7 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 
 		$progress_bar = WP_CLI\Utils\make_progress_bar( 'Migrating Attachments Media Credits', count( $attachments_ids ), 1 );
 
-		$this->logger->log( $log, sprintf( 'Start processing attachments %s', date( 'Y-m-d H:I:s' ) ) );
+		$this->logger->log( $log, sprintf( 'Start processing attachments %s', date( 'Y-m-d H:i:s' ) ) );
 
 		// Migrate Issues to Posts with Issues Category.
 		foreach ( $attachments_ids as $index => $attachment_id ) {
@@ -360,6 +403,416 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 		WP_CLI::success( sprintf( 'Done. See %s', $log ) );
 	}
 
+	/**
+	 * Content Refreshes the CAP Terms.
+	 * 
+	 * !IMPORTANT! This command doesn't support Guest Authors, yet..
+	 */
+	public function cmd_content_refresh_cap_terms( array $args, array $assoc_args ): void {
+		global $wpdb;
+
+		$live_table_prefix = $assoc_args['live-table-prefix'];
+		$dry_run = $assoc_args['dry-run'] ?? false;
+
+		// Logs.
+		$log = sprintf( 'arkansastimes-content-refresh-coauthors-terms-%s.log', date( 'Y-m-d H-i-s' ) );
+
+		// CSV.
+		$csv              = sprintf( 'arkansastimes-content-refresh-coauthors-terms-%s.csv', date( 'Y-m-d H-i-s' ) );
+		$csv_file_pointer = fopen( $csv, 'w' );
+		$index            = 0;
+		fputcsv(
+			$csv_file_pointer,
+			[
+				'#',
+				'Name',
+				'Slug',
+				'Description',
+				'Original Term ID',
+				'Original Term Taxonomy ID',
+				'New Term ID',
+				'New Term Taxonomy ID',
+			] 
+		);
+
+		$this->logger->log( $log, sprintf( '[%s] Start processing Co-Authors', date( 'Y-m-d H:i:s' ) ), false );
+
+		$local_authors = get_terms( [
+			'taxonomy' => 'author',
+			'hide_empty' => false,
+		] );
+
+		$this->logger->log( $log, sprintf( '[%s] Found %d local Co-Authors', date( 'Y-m-d H:i:s' ), count( $local_authors ) ), false );
+
+		$live_authors = $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT %1$i.`term_id`, `term_taxonomy_id`, `name`, `description`, `slug`, `term_group`, `count`
+				FROM %1$i
+				INNER JOIN %2$i
+				ON %1$i.`term_id` = %2$i.`term_id`
+				WHERE %1$i.`taxonomy` = "author"',
+				"{$live_table_prefix}term_taxonomy",
+				"{$live_table_prefix}terms"
+			)
+		);
+
+		$this->logger->log( $log, sprintf( '[%s] Found %d live Co-Authors', date( 'Y-m-d H:i:s' ), count( $live_authors ) ), false );
+
+		$progress_bar = WP_CLI\Utils\make_progress_bar( sprintf( '[Memory: %s] Processing Co-Authors', size_format( memory_get_usage( true ) ) ), count( $live_authors ), 1 );
+
+		foreach ( $live_authors as $live_author ) {
+			$progress_bar->tick( 1, sprintf( '[Memory: %s] Processing Co-Authors', size_format( memory_get_usage( true ) ) ) );
+
+			foreach ( $local_authors as $local_author ) {
+				if (
+					$local_author->name === $live_author->name
+					&& $local_author->description === $live_author->description
+					&& $local_author->slug === $live_author->slug
+				) {
+					continue 2;
+				}
+			}
+
+			$this->logger->log( $log, sprintf( '[%s] Found new Co-Author with Name %s', date( 'Y-m-d H:i:s' ), $live_author->name ), false );
+
+			$index++;
+
+			$new_author_local_term = null;
+
+			if ( ! $dry_run ) {
+				$new_author_local_term = wp_insert_term(
+					$live_author->name,
+					'author',
+					[
+						'description' => $live_author->description,
+						'slug' => $live_author->slug,
+					]
+				);
+
+				add_term_meta( $new_author_local_term['term_id'], 'newspack_source_term_id', $live_author->term_id );
+			}
+
+			fputcsv(
+				$csv_file_pointer,
+				[
+					$index,
+					$live_author->name,
+					$live_author->slug,
+					$live_author->description,
+					$live_author->term_id,
+					$live_author->term_taxonomy_id,
+					$new_author_local_term['term_id'] ?? '',
+					$new_author_local_term['term_taxonomy_id'] ?? ''
+				] 
+			);
+		}
+
+		$progress_bar->finish();
+
+		// Close CSV.
+		fclose( $csv_file_pointer );
+
+		WP_CLI::success( sprintf( 'Done. See %s', $log ) );
+	}
+
+	/**
+	 * Content Refreshes the CAP data for Posts.
+	 * 
+	 * !IMPORTANT! This command doesn't support Guest Authors, yet..
+	 */
+	public function cmd_content_refresh_cap_posts( array $args, array $assoc_args ): void {
+		global $wpdb;
+
+		$live_table_prefix = $assoc_args['live-table-prefix'];
+		$dry_run = $assoc_args['dry-run'] ?? false;
+
+		$local_authors = get_terms( [
+			'taxonomy' => 'author',
+			'hide_empty' => false,
+		] );
+
+		$local_authors_by_term_id = array_reduce( $local_authors, function ( $carry, $term ) {
+			$carry[ $term->term_id ] = $term;
+
+			return $carry;
+		}, [] );
+
+		$authors_map = $this->get_cap_authors_live_local_map( $live_table_prefix );
+
+		// Logs.
+		$log = sprintf( 'arkansastimes-content-refresh-coauthors-posts-%s.log', date( 'Y-m-d H-i-s' ) );
+
+		// CSV.
+		$csv              = sprintf( 'arkansastimes-content-refresh-coauthors-posts-%s.csv', date( 'Y-m-d H-i-s' ) );
+		$csv_file_pointer = fopen( $csv, 'w' );
+		fputcsv(
+			$csv_file_pointer,
+			[
+				'#',
+				'Post Date',
+				'Live Post ID',
+				'Local Post ID',
+				'Post Title',
+				'Live Site URL',
+				'Staging Site URL',
+				'Live Authors',
+				'Local Authors',
+				'Missing Authors',
+				'Extra Authors',
+			] 
+		);
+
+		// Get Posts Map (live post id => local post id).
+		$posts_map = array_reduce( $wpdb->get_results(
+			$wpdb->prepare(
+				'SELECT `post_id`, `meta_value` as `live_post_id`
+				FROM %1$i
+				INNER JOIN %2$i
+				ON %1$i.`post_id` = %2$i.`ID`
+				WHERE `meta_key` = "newspackcontentdiff_live_id"
+				AND `post_type` = "post"
+				',
+				$wpdb->postmeta,
+				$wpdb->posts
+			)
+		), function ( $carry, $item ) {
+			$carry[ $item->live_post_id ] = $item->post_id;
+
+			return $carry;
+		}, [] );
+
+		// Get Post to Author Terms Map.
+		$live_posts_to_authors_terms_map = $this->get_posts_to_authors_terms_map( $live_table_prefix, array_keys( $posts_map ) );
+		$local_posts_to_authors_terms_map = $this->get_posts_to_authors_terms_map( $wpdb->prefix, array_values( $posts_map ) );
+
+		$progress_bar = WP_CLI\Utils\make_progress_bar( sprintf( '[Memory: %s] Processing Posts', size_format( memory_get_usage( true ) ) ), count( array_keys( $posts_map ) ), 1 );
+
+		$index = 0;
+
+		foreach ( $posts_map as $live_post_id => $local_post_id ) {
+			$progress_bar->tick( 1, sprintf( '[Memory: %s] Processing Posts', size_format( memory_get_usage( true ) ) ) );
+
+			$live_post_to_local_authors_map = array_map( fn ( $term_id ) => (int) $authors_map[ $term_id ], $live_posts_to_authors_terms_map[ $live_post_id ] );
+
+			$local_post_extra_authors = array_diff( $local_posts_to_authors_terms_map[ $local_post_id ], $live_post_to_local_authors_map );
+			$local_post_missing_authors = array_diff( $live_post_to_local_authors_map, $local_posts_to_authors_terms_map[ $local_post_id ] );
+
+			if ( ( count( $local_post_extra_authors ) === 0 ) && ( count( $local_post_missing_authors ) ) === 0 ) {
+				continue;
+			}
+
+			$index++;
+
+			fputcsv(
+				$csv_file_pointer,
+				[
+					$index,
+					get_post_field( 'post_date', $local_post_id ),
+					$live_post_id,
+					$local_post_id,
+					get_the_title( $local_post_id ),
+					str_replace( home_url( '/' ), 'https://arktimes.com/', get_permalink( $local_post_id ) ),
+					get_permalink( $local_post_id ),
+					implode( ',', $live_post_to_local_authors_map ) . ';' . implode( ',', array_map( fn ( $term_id ) => $local_authors_by_term_id[ $term_id ]->name, $live_post_to_local_authors_map ) ),
+					implode( ',', $local_posts_to_authors_terms_map[ $local_post_id ] ) . ';' . implode( ',', array_map( fn ( $term_id ) => $local_authors_by_term_id[ $term_id ]->name, $local_posts_to_authors_terms_map[ $local_post_id ] ) ),
+					implode( ',', $local_post_missing_authors ) . ';' . implode( ',', array_map( fn ( $term_id ) => $local_authors_by_term_id[ $term_id ]->name, $local_post_missing_authors ) ),
+					implode( ',', $local_post_extra_authors ) . ';' . implode( ',', array_map( fn ( $term_id ) => $local_authors_by_term_id[ $term_id ]->name, $local_post_extra_authors ) )
+				]
+			);
+
+			if ( ! $dry_run ) {
+				wp_set_post_terms( $local_post_id, $live_post_to_local_authors_map, 'author' );
+			}
+		}
+
+		$progress_bar->finish();
+
+		// Close CSV.
+		fclose( $csv_file_pointer );
+
+		WP_CLI::success( sprintf( 'Done. See %s', $log ) );
+	}
+
+	/**
+	 * Fix Attachment referencing to live DB after Content Refresh.
+	 */
+	public function cmd_content_refresh_fix_attachments_reference_to_live_db( array $args, array $assoc_args ): void {
+		$content_refresh_dir = $assoc_args['content-refresh-dir'];
+
+		// Logs.
+		$log = sprintf( 'arkansastimes-content-refresh-fix-attachments-%s.log', date( 'Y-m-d H-i-s' ) );
+
+		// CSV.
+		$csv              = sprintf( 'arkansastimes-content-refresh-fix-attachments-%s.csv', date( 'Y-m-d H-i-s' ) );
+		$csv_file_pointer = fopen( $csv, 'w' );
+		fputcsv(
+			$csv_file_pointer,
+			[
+				'#',
+				'Post Date',
+				'Live Post ID',
+				'Local Post ID',
+				'Post Title',
+				'Live Site URL',
+				'Staging Site URL',
+			] 
+		);
+
+		$imported_posts_data = $this->get_data_from_log(
+			$content_refresh_dir . '/content-diff__imported-post-ids.log',
+			[ 'post_type', 'id_old', 'id_new' ]
+		) ?? [];
+
+		$posts = array_reduce( $imported_posts_data, function ( $carry, $item ) {
+			if ( $item['post_type'] === 'post' ) {
+				$carry[ $item['id_old'] ] = $item['id_new'];
+			}
+
+			return $carry;
+		}, [] );
+
+		$attachments = array_reduce( $imported_posts_data, function ( $carry, $item ) {
+			if ( $item['post_type'] === 'attachment' ) {
+				$carry[ $item['id_old'] ] = $item['id_new'];
+			}
+
+			return $carry;
+		}, [] );
+
+		$site_host = parse_url( home_url() );
+		$site_host = $site_host['host'];
+
+		$progress_bar = WP_CLI\Utils\make_progress_bar( sprintf( '[Memory: %s] Processing Posts', size_format( memory_get_usage( true ) ) ), count( $posts ), 1 );
+
+		foreach ( $posts as $live_post_id => $post_id ) {
+			$progress_bar->tick( 1, sprintf( '[Memory: %s] Processing Posts', size_format( memory_get_usage( true ) ) ) );
+
+			$this->logger->log( $log, sprintf( '[%s] Processing Post %s', date( 'Y-m-d H:i:s' ), $post_id ) );
+
+			$post_content_before = get_post_field( 'post_content', $post_id );
+			$post_content_after  = $post_content_before;	
+
+			if ( has_blocks( $post_content_before ) ) {
+				$this->logger->log( $log, sprintf( '[%s] Post Contains blocks', date( 'Y-m-d H:i:s' ) ), false );
+
+				$this->content_diff_migrator->update_blocks_ids(
+					[
+						$post_id
+					],
+					$attachments,
+					[],
+					$log
+				);
+
+				clean_post_cache( $post_id );
+
+				$post_content_after = get_post_field( 'post_content', $post_id );
+
+				$post_content_blocks = parse_blocks( $post_content_after );
+
+				// Manually fix galleries
+				foreach ( $post_content_blocks as $block_index => $block ) {
+					if ( $block['blockName'] === 'core/gallery' ) {
+						$attachment_ids = array_map( function ( $innerBlock ) {
+							return $innerBlock['attrs']['id'];
+						}, $block['innerBlocks'] );
+					
+						$post_content_blocks[ $block_index ] = $this->gutenberg_block_generator->get_gallery(
+							$attachment_ids,
+							3,
+							'full',
+							'none',
+							true
+						);
+
+						$this->logger->log( $log, sprintf( '[%s] Updated Post Gallery Block', date( 'Y-m-d H:i:s' ) ), false );
+					} else if ( $block['blockName'] === 'core/image' ) {
+						if ( isset( $block['attrs']['id'] ) ) {
+							$attachment_id = $block['attrs']['id'];
+						} else {
+							$this->logger->log( $log, sprintf( '[%s] Issue with Image Block ID. Check manually!!!', date( 'Y-m-d H:i:s' ) ) );
+
+							continue;
+						}
+
+						$attachment_post = get_post( $attachment_id );
+
+						if ( ! $attachment_post ) {
+							$this->logger->log( $log, sprintf( '[%s] Missing Attachment! Check manually!', date( 'Y-m-d H:i:s' ) ) );
+
+							continue;
+						}
+
+						$post_content_blocks[ $block_index ] = $this->gutenberg_block_generator->get_image(
+							$attachment_post,
+							'full',
+							false,
+							$block['attrs']['className'] ?? null,
+							$block['attrs']['align'] ?? null
+						);
+
+						$this->logger->log( $log, sprintf( '[%s] Updated Post Image Block', date( 'Y-m-d H:i:s' ) ), false );
+					}
+				}
+
+				$post_content_after = serialize_blocks( $post_content_blocks );
+			} else if ( strpos( $post_content_before, '[caption' ) !== false ) {
+				$this->logger->log( $log, sprintf( '[%s] Post Contains [caption] shortcode', date( 'Y-m-d H:i:s' ) ), false );
+
+				preg_match_all( '~' . get_shortcode_regex( array( 'caption' ) ) . '~', $post_content_before, $caption_shortcode_matches, PREG_SET_ORDER );
+
+				foreach ( $caption_shortcode_matches as $caption_shortcode_match ) {
+					preg_match( '~wp\-image\-(\d+)~', $caption_shortcode_match[0], $attachment_id );
+					preg_match( '~src=\"(.+)\"~', $caption_shortcode_match[0], $attachment_id );
+
+					$attachment_id = $attachment_id[1];
+
+					$new_attachment_id = isset( $attachments[ $attachment_id ] ) ? $attachments[ $attachment_id ] : $attachment_id;
+
+					$post_content_after = str_replace( 'wp-image-' . $attachment_id, 'wp-image-' . $new_attachment_id, $post_content_after );
+					$post_content_after = str_replace( 'attachment_' . $attachment_id, 'attachment_' . $new_attachment_id, $post_content_after );
+				}
+
+				$post_content_after = str_replace( 'arktimes.com', $site_host, $post_content_after );
+
+				$this->logger->log( $log, sprintf( '[%s] Updated Post [caption] shortcode src', date( 'Y-m-d H:i:s' ) ), false );
+			}
+
+			if ( $post_content_before !== $post_content_after ) {
+				wp_update_post( [
+					'ID' => $post_id,
+					'post_content' => $post_content_after,
+				] );
+	
+				fputcsv(
+					$csv_file_pointer,
+					[
+						$post_id,
+						get_post_field( 'post_date', $post_id ),
+						$live_post_id,
+						$post_id,
+						get_the_title( $post_id ),
+						'https://arktimes.com/?p=' . $live_post_id,
+						get_permalink( $post_id )
+					] 
+				);
+	
+				file_put_contents( $post_id . '-before.txt', $post_content_before );
+				file_put_contents( $post_id . '-after.txt', $post_content_after );
+
+				$this->logger->log( $log, sprintf( '[%s] Post Updated', date( 'Y-m-d H:i:s' ) ), false );
+
+				$this->logger->log( $log, sprintf( '[%s] Content Before: %s', date( 'Y-m-d H:i:s' ), $post_content_before ), false );
+				$this->logger->log( $log, sprintf( '[%s] Content After: %s', date( 'Y-m-d H:i:s' ), $post_content_after ), false );
+			}
+		}
+
+		// Close CSV.
+		fclose( $csv_file_pointer );
+
+		WP_CLI::success( sprintf( 'Done. See %s', $log ) );
+	}
+
 	/** 
 	 * Check if Issues category exist and creates if it doesn't.
 	 * Returns the Category Issues term_id.
@@ -427,5 +880,137 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 
 		<?php
 		return ob_get_clean();
+	}
+
+	/**
+	 * Get Map of Live DB CAP Authors Terms and Local DB CAP Authors Terms
+	 */
+	private function get_cap_authors_live_local_map( $live_table_prefix ): array {
+		global $wpdb;
+
+		$authors_map = [];
+
+		$live_authors = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT %i.`term_id`, `term_taxonomy_id`, `name`, `description`, `slug`, `term_group`, `count`
+				FROM %i
+				INNER JOIN %i
+				ON %i.`term_id` = %i.`term_id`
+				WHERE %i.`taxonomy` = 'author'",
+				"{$live_table_prefix}term_taxonomy",
+				"{$live_table_prefix}term_taxonomy",
+				"{$live_table_prefix}terms",
+				"{$live_table_prefix}term_taxonomy",
+				"{$live_table_prefix}terms",
+				"{$live_table_prefix}term_taxonomy"
+			)
+		);
+
+		$local_authors = get_terms( [
+			'taxonomy' => 'author',
+			'hide_empty' => false,
+		] );
+
+		foreach ( $live_authors as $live_author ) {
+			$authors_map[ $live_author->term_id ] = null;
+
+			foreach ( $local_authors as $local_author ) {
+				if (
+					$local_author->name === $live_author->name
+					&& $local_author->description === $live_author->description
+					&& $local_author->slug === $live_author->slug
+				) {
+					$authors_map[ $live_author->term_id ] = $local_author->term_id;
+
+					continue 2;
+				}
+			}
+		}
+
+		return $authors_map;
+	}
+
+	private function get_posts_to_authors_terms_map( $table_prefix, $posts_ids ) {
+		global $wpdb;
+
+		if ( empty( $posts_ids ) ) {
+			return [];
+		}
+
+		$results = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT %i.`term_id`, `object_id`
+				FROM %i
+				INNER JOIN %i
+				ON %i.`term_taxonomy_id` = %i.`term_taxonomy_id`
+				WHERE `taxonomy` = 'author'
+				AND `object_id` IN (" . implode( ',', $posts_ids ) . ")",
+				"{$table_prefix}term_taxonomy",
+				"{$table_prefix}term_relationships",
+				"{$table_prefix}term_taxonomy",
+				"{$table_prefix}term_relationships",
+				"{$table_prefix}term_taxonomy"
+			)
+		);
+
+		$map = array_reduce( $results, function ( $carry, $item ) {
+			if ( ! isset( $carry[ $item->object_id ] ) ) {
+				$carry[ $item->object_id ] = [];
+			}
+
+			$carry[ $item->object_id ][] = $item->term_id;
+
+			return $carry;
+		}, [] );
+
+		foreach ( $posts_ids as $post_id ) {
+			if ( ! isset( $map[ $post_id ] ) ) {
+				$map[$post_id] = [];
+			}
+		}
+
+		return $map;
+	}
+
+	/**
+	 * Duplicate from ContentDiffMigrator@get_data_from_log
+	 */
+	/**
+	 * Gets data from logs which contain JSON encoded arrays per line.
+	 *
+	 * @param string $log       Path to log.
+	 * @param array  $json_keys Keys to fetch from log lines.
+	 *
+	 * @return array|null Array with subarray elements with $json_keys keys and values pulled from the log, or null if file can't be found.
+	 */
+	private function get_data_from_log( $log, $json_keys ) {
+		$data = [];
+
+		// Read line by line.
+		$handle = fopen( $log, 'r' );
+		if ( $handle ) {
+			while ( ( $line = fgets( $handle ) ) !== false ) {
+				// Skip if not JSON data on line.
+				$line_decoded = json_decode( $line, true );
+				if ( ! is_array( $line_decoded ) ) {
+					continue;
+				}
+
+				// Get data if line contains these JSON keys.
+				$data_key          = count( $data );
+				$data[ $data_key ] = [];
+				foreach ( $json_keys as $json_key ) {
+					if ( isset( $line_decoded[ $json_key ] ) ) {
+						$data[ $data_key ] = array_merge( $data[ $data_key ], [ $json_key => $line_decoded[ $json_key ] ] );
+					}
+				}
+			}
+
+			fclose( $handle );
+		} else {
+			return null;
+		}
+
+		return $data;
 	}
 }

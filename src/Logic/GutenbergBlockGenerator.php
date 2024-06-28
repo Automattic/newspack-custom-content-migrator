@@ -226,19 +226,19 @@ class GutenbergBlockGenerator {
 
 		// Inner content.
 		$inner_content = array_fill( 1, count( $attachment_posts ), null );
-		array_unshift( $inner_content, '<figure class="wp-block-gallery has-nested-images columns-' . $images_per_row . '">' );
+		array_unshift( $inner_content, '<figure class="wp-block-gallery has-nested-images columns-' . $images_per_row . ' ' . ($crop_images ? 'is-cropped' : '') .'">' );
 		array_push( $inner_content, '</figure>' );
 
 		return [
 			'blockName'    => 'core/gallery',
 			'attrs'        => [
 				'columns'   => $images_per_row,
-				'imageCrop' => $crop_images,
+				// 'imageCrop' => $crop_images,
 				'linkTo'    => $image_link_to,
 				'sizeSlug'  => $image_size,
 			],
 			'innerBlocks'  => $image_blocks,
-			'innerHTML'    => '<figure class="wp-block-gallery has-nested-images columns-' . $images_per_row . '"></figure>',
+			'innerHTML'    => '<figure class="wp-block-gallery has-nested-images columns-' . $images_per_row . ' ' . ($crop_images ? 'is-cropped' : '') . '"></figure>',
 			'innerContent' => $inner_content,
 		];
 	}
