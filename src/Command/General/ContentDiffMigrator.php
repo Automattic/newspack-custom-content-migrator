@@ -19,15 +19,15 @@ use WP_CLI;
  */
 class ContentDiffMigrator implements InterfaceCommand {
 
-	const LOG_IDS_CSV                     = 'content-diff__new-ids-csv.log';
-	const LOG_IDS_MODIFIED                = 'content-diff__modified-ids.log';
-	const LOG_IMPORTED_POST_IDS           = 'content-diff__imported-post-ids.log';
-	const LOG_UPDATED_PARENT_IDS          = 'content-diff__updated-parent-ids.log';
-	const LOG_DELETED_MODIFIED_IDS        = 'content-diff__deleted-modified-ids.log';
-	const LOG_UPDATED_FEATURED_IMAGES_IDS = 'content-diff__updated-feat-imgs-ids.log';
-	const LOG_UPDATED_BLOCKS_IDS          = 'content-diff__wp-blocks-ids-updates.log';
-	const LOG_ERROR                       = 'content-diff__err.log';
-	const LOG_RECREATED_CATEGORIES        = 'content-diff__recreated_categories.log';
+	const LOG_IDS_CSV                           = 'content-diff__new-ids-csv.log';
+	const LOG_IDS_MODIFIED                      = 'content-diff__modified-ids.log';
+	const LOG_IMPORTED_POST_IDS                 = 'content-diff__imported-post-ids.log';
+	const LOG_UPDATED_PARENT_IDS                = 'content-diff__updated-parent-ids.log';
+	const LOG_DELETED_MODIFIED_IDS              = 'content-diff__deleted-modified-ids.log';
+	const LOG_UPDATED_FEATURED_IMAGES_IDS       = 'content-diff__updated-feat-imgs-ids.log';
+	const LOG_UPDATED_BLOCKS_IDS                = 'content-diff__wp-blocks-ids-updates.log';
+	const LOG_ERROR                             = 'content-diff__err.log';
+	const LOG_RECREATED_HIERARCHICAL_TAXONOMIES = 'content-diff__recreated_hierarchical_taxonomies.log';
 
 	/**
 	 * Instance.
@@ -62,7 +62,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 *
 	 * @var null|string Full path to file.
 	 */
-	private $log_recreated_categories;
+	private $log_recreated_hierarchical_taxonomies;
 
 	/**
 	 * Log containing imported post IDs.
@@ -77,6 +77,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @var null|string Full path to file.
 	 */
 	private $log_updated_posts_parent_ids;
+
+	/**
+	 * Log containing post IDs which were deleted and reimported.
+	 *
+	 * @var null|string Full path to file.
+	 */
+	private $log_deleted_modified_ids;
 
 	/**
 	 * Log containing attachment IDs which were updated to new IDs if used as attachment images.
@@ -167,6 +174,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 						'name'        => 'live-table-prefix',
 						'description' => 'Live site table prefix.',
 						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'custom-taxonomies-csv',
+						'description' => 'CSV of all the custm taxonomies to import, no extra spaces. E.g. --custom-taxonomies-csv=brand,author,custom_taxonomy.',
+						'optional'    => true,
 						'repeating'   => false,
 					],
 				],
@@ -482,8 +496,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @param array $assoc_args CLI assoc args.
 	 */
 	public function cmd_migrate_live_content( $args, $assoc_args ) {
-		$import_dir        = $assoc_args['import-dir'] ?? false;
-		$live_table_prefix = $assoc_args['live-table-prefix'] ?? false;
+		global $wpdb;
+
+		$import_dir                             = $assoc_args['import-dir'] ?? false;
+		$live_table_prefix                      = $assoc_args['live-table-prefix'] ?? false;
+		$custom_taxonomies                      = isset( $assoc_args['custom-taxonomies-csv'] ) ? explode( ',', $assoc_args['custom-taxonomies-csv'] ) : [];
+		$hierarchical_taxonomies_to_migrate     = [ 'category' ];
+		$non_hierarchical_taxonomies_to_migrate = [ 'post_tag' ];
 
 		// Validate all params.
 		$file_ids_csv      = $import_dir . '/' . self::LOG_IDS_CSV;
@@ -513,32 +532,56 @@ class ContentDiffMigrator implements InterfaceCommand {
 			);
 		}
 
+		// Validate custom taxonomies, and separate hierarchical from non-hierarchical.
+		if ( ! empty( $custom_taxonomies ) ) {
+			// Check if any of the custom taxonomies exist in the live DB.
+			$live_table_prefix_escaped = esc_sql( $live_table_prefix );
+			// phpcs:ignore -- table prefix string value was escaped.
+			$custom_taxonomies_live = $wpdb->get_col( "SELECT DISTINCT( taxonomy ) FROM {$live_table_prefix_escaped}term_taxonomy WHERE taxonomy NOT IN ('category', 'post_tag') ;" );
+			WP_CLI::log( sprintf( 'These unique custom taxonomies exist in live DB:%s', "\n- " . implode( "\n- ", $custom_taxonomies_live ) ) );
+
+			array_walk(
+				$custom_taxonomies,
+				function ( &$v ) use ( $custom_taxonomies_live, &$hierarchical_taxonomies_to_migrate, &$non_hierarchical_taxonomies_to_migrate ) {
+					if ( ! in_array( $v, $custom_taxonomies_live ) ) {
+						WP_CLI::error( sprintf( 'Custom taxonomy %s not found in live DB.', $v ) );
+					}
+
+					if ( is_taxonomy_hierarchical( $v ) ) {
+						$hierarchical_taxonomies_to_migrate[] = $v;
+					} else {
+						$non_hierarchical_taxonomies_to_migrate[] = $v;
+					}
+				}
+			);
+		}
+
 		// Set constants.
-		$this->live_table_prefix             = $live_table_prefix;
-		$this->log_error                     = $import_dir . '/' . self::LOG_ERROR;
-		$this->log_recreated_categories      = $import_dir . '/' . self::LOG_RECREATED_CATEGORIES;
-		$this->log_imported_post_ids         = $import_dir . '/' . self::LOG_IMPORTED_POST_IDS;
-		$this->log_updated_posts_parent_ids  = $import_dir . '/' . self::LOG_UPDATED_PARENT_IDS;
-		$this->log_deleted_modified_ids      = $import_dir . '/' . self::LOG_DELETED_MODIFIED_IDS;
-		$this->log_updated_featured_imgs_ids = $import_dir . '/' . self::LOG_UPDATED_FEATURED_IMAGES_IDS;
-		$this->log_updated_blocks_ids        = $import_dir . '/' . self::LOG_UPDATED_BLOCKS_IDS;
+		$this->live_table_prefix                     = $live_table_prefix;
+		$this->log_error                             = $import_dir . '/' . self::LOG_ERROR;
+		$this->log_recreated_hierarchical_taxonomies = $import_dir . '/' . self::LOG_RECREATED_HIERARCHICAL_TAXONOMIES;
+		$this->log_imported_post_ids                 = $import_dir . '/' . self::LOG_IMPORTED_POST_IDS;
+		$this->log_updated_posts_parent_ids          = $import_dir . '/' . self::LOG_UPDATED_PARENT_IDS;
+		$this->log_deleted_modified_ids              = $import_dir . '/' . self::LOG_DELETED_MODIFIED_IDS;
+		$this->log_updated_featured_imgs_ids         = $import_dir . '/' . self::LOG_UPDATED_FEATURED_IMAGES_IDS;
+		$this->log_updated_blocks_ids                = $import_dir . '/' . self::LOG_UPDATED_BLOCKS_IDS;
 
 		// Timestamp the logs.
 		$ts = gmdate( 'Y-m-d h:i:s a', time() );
 		$this->log( $this->log_error, sprintf( 'Starting %s.', $ts ) );
-		$this->log( $this->log_recreated_categories, sprintf( 'Starting %s.', $ts ) );
+		$this->log( $this->log_recreated_hierarchical_taxonomies, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_imported_post_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_posts_parent_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_deleted_modified_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_featured_imgs_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_blocks_ids, sprintf( 'Starting %s.', $ts ) );
 
-		// Before we create categories, let's make sure categories have valid parents. If they don't they should be fixed first.
-		WP_CLI::log( 'Validating categories...' );
-		$this->validate_categories();
+		// Before we create hierarchical taxonomies, let's make sure hierarchical taxonomies have valid parents. If they don't they should be fixed first.
+		WP_CLI::log( 'Validating hierarchical taxonomies...' );
+		$this->validate_hierarchical_taxonomies( $hierarchical_taxonomies_to_migrate );
 
-		WP_CLI::log( 'Recreating categories...' );
-		$category_term_id_updates = $this->recreate_categories();
+		WP_CLI::log( 'Recreating hierarchical taxonomies...' );
+		$hierarchical_taxonomy_term_id_updates = $this->recreate_hierarchical_taxonomies( $hierarchical_taxonomies_to_migrate );
 
 		if ( ! empty( $all_live_modified_posts_data ) ) {
 			WP_CLI::log( sprintf( 'Deleting %s modified posts before they are reimported...', count( $all_live_modified_posts_data ) ) );
@@ -565,7 +608,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$all_live_posts_ids = array_merge( $all_live_posts_ids, $modified_live_ids );
 
 		WP_CLI::log( sprintf( 'Importing %d objects, hold tight...', count( $all_live_posts_ids ) ) );
-		$imported_posts_data = $this->import_posts( $all_live_posts_ids, $category_term_id_updates );
+		$imported_posts_data = $this->import_posts( $all_live_posts_ids, $hierarchical_taxonomy_term_id_updates );
 
 		WP_CLI::log( 'Updating Post parent IDs...' );
 		$this->update_post_parent_ids( $all_live_posts_ids, $imported_posts_data );
@@ -600,43 +643,45 @@ class ContentDiffMigrator implements InterfaceCommand {
 	/**
 	 * Validates local DB and live DB categories. Checks if the categories' parent term_ids are correct and resets those if not.
 	 *
+	 * @param array $taxonomies_to_check Hierarchical taxonomies to validate.
+	 *
 	 * @return void
 	 */
-	public function validate_categories(): void {
+	public function validate_hierarchical_taxonomies( $taxonomies_to_check ): void {
 		global $wpdb;
 
-		// Check if any of the local categories have nonexistent wp_term_taxonomy.parent, and fix those before continuing.
-		$categories = self::$logic->get_categories_with_nonexistent_parents( $wpdb->prefix );
-		if ( ! empty( $categories ) ) {
+		// Check if any of the local taxonomies have nonexistent wp_term_taxonomy.parent, and fix those before continuing.
+		$hierarchical_taxonomies = self::$logic->get_taxonomies_with_nonexistent_parents( $wpdb->prefix, $taxonomies_to_check );
+		if ( ! empty( $hierarchical_taxonomies ) ) {
 			$list              = '';
 			$term_taxonomy_ids = [];
-			foreach ( $categories as $category ) {
-				$list               .= ( empty( $list ) ? '' : "\n" ) . '  ' . json_encode( $category );
-				$term_taxonomy_ids[] = $category['term_taxonomy_id'];
+			foreach ( $hierarchical_taxonomies as $hierarchical_taxonomy ) {
+				$list               .= ( empty( $list ) ? '' : "\n" ) . '  ' . wp_json_encode( $hierarchical_taxonomy );
+				$term_taxonomy_ids[] = $hierarchical_taxonomy['term_taxonomy_id'];
 			}
 
-			WP_CLI::warning( 'The following local DB categories have invalid parent IDs which must be fixed (and set to 0) first.' );
+			WP_CLI::warning( 'The following local DB hierarchical taxonomies have invalid parent IDs which must be fixed (and set to 0) first.' );
 			WP_CLI::log( $list );
 
-			WP_CLI::confirm( "OK to fix and set all these categories' parents to 0?" );
-			self::$logic->reset_categories_parents( $wpdb->prefix, $term_taxonomy_ids );
+			WP_CLI::confirm( "OK to fix and set all these hierarchical taxonomies' parents to 0?" );
+			self::$logic->reset_hierarchical_taxonomies_parents( $wpdb->prefix, $term_taxonomy_ids );
 		}
 
-		// Check the same for Live DB's categories, and fix those before continuing.
-		$categories = self::$logic->get_categories_with_nonexistent_parents( $this->live_table_prefix );
-		if ( ! empty( $categories ) ) {
+		// Check the same for Live DB's hierarchical taxonomies, and fix those before continuing.
+		$hierarchical_taxonomies = self::$logic->get_taxonomies_with_nonexistent_parents( $this->live_table_prefix, $taxonomies_to_check );
+		if ( ! empty( $hierarchical_taxonomies ) ) {
 			$list              = '';
 			$term_taxonomy_ids = [];
-			foreach ( $categories as $category ) {
-				$list               .= ( empty( $list ) ? '' : "\n" ) . '  ' . json_encode( $category );
-				$term_taxonomy_ids[] = $category['term_taxonomy_id'];
+			foreach ( $hierarchical_taxonomies as $hierarchical_taxonomy ) {
+				$list               .= ( empty( $list ) ? '' : "\n" ) . '  ' . json_encode( $hierarchical_taxonomy );
+				$term_taxonomy_ids[] = $hierarchical_taxonomy['term_taxonomy_id'];
 			}
 
-			WP_CLI::warning( 'The following live DB categories have invalid parent IDs which must be fixed (and set to 0) first.' );
+			WP_CLI::warning( 'The following live DB hierarchical taxonomies have invalid parent IDs which must be fixed (and set to 0) first.' );
 			WP_CLI::log( $list );
 
-			WP_CLI::confirm( "OK to fix and set all these categories' parents to 0?" );
-			self::$logic->reset_categories_parents( $this->live_table_prefix, $term_taxonomy_ids );
+			WP_CLI::confirm( "OK to fix and set all these hierarchical taxonomies' parents to 0?" );
+			self::$logic->reset_hierarchical_taxonomies_parents( $this->live_table_prefix, $term_taxonomy_ids );
 		}
 	}
 
@@ -699,7 +744,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 					"select ID
 					from $wpdb->posts
 					where post_type = 'post'
-					and post_status in ( 'publish', 'draft' ) 
+					and post_status in ( 'publish', 'draft' )
 					and ID >= %d
 					and ID <= %d
 					order by ID asc",
@@ -721,23 +766,25 @@ class ContentDiffMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Recreates all categories from Live to local.
+	 * Recreates all hierarchical taxonomies from Live to local.
 	 *
 	 * If hierarchical cats are used, their whole structure should be in place when they get assigned to posts.
 	 *
-	 * @return array Map of category term_id udpdates. Keys are categories' term_ids on Live and values are corresponding
-	 *               categories' term_ids on local (staging).
+	 * @param array $hierarchical_taxonomies_to_migrate Hierarchical taxonomies to migrate.
+	 *
+	 * @return array Map of taxonomy term_id udpdates. Keys are hierarchical taxonomies' term_ids on Live and values are corresponding
+	 *               hierarchical taxonomies' term_ids on local (staging).
 	 */
-	public function recreate_categories() {
-		$category_term_id_updates = self::$logic->recreate_categories( $this->live_table_prefix );
+	public function recreate_hierarchical_taxonomies( $hierarchical_taxonomies_to_migrate ) {
+		$hierarchical_taxonomy_term_id_updates = self::$logic->recreate_hierarchical_taxonomies( $this->live_table_prefix, $hierarchical_taxonomies_to_migrate );
 
-		// Log category term_id updates.
+		// Log taxonomy term_id updates.
 		$this->log(
-			$this->log_recreated_categories,
-			json_encode( [ 'category_term_id_updates' => $category_term_id_updates ] )
+			$this->log_recreated_hierarchical_taxonomies,
+			wp_json_encode( [ 'hierarchical_taxonomy_term_id_updates' => $hierarchical_taxonomy_term_id_updates ] )
 		);
 
-		return $category_term_id_updates;
+		return $hierarchical_taxonomy_term_id_updates;
 	}
 
 	/**
@@ -757,8 +804,8 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * Creates and imports posts and all related post data. Skips previously imported IDs found in $this->log_imported_post_ids.
 	 *
 	 * @param array $all_live_posts_ids       Live IDs to be imported to local.
-	 * @param array $category_term_id_updates Map of updated category term_ids. Keys are Categories' term_ids on live, and values
-	 *                                        are corresponding Categories' term_ids on local (staging).
+	 * @param array $hierarchical_taxonomy_term_id_updates Map of updated hierarchical taxonomy term_ids. Keys are Taxonomies' term_ids on live, and values
+	 *                                        are corresponding Taxonomies' term_ids on local (staging).
 	 *
 	 * @return array $imported_posts_data {
 	 *     Array with subarray records for all the imported post objects.
@@ -770,7 +817,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 *     }
 	 * }
 	 */
-	public function import_posts( $all_live_posts_ids, $category_term_id_updates ) {
+	public function import_posts( $all_live_posts_ids, $hierarchical_taxonomy_term_id_updates ) {
 
 		$post_ids_for_import = $all_live_posts_ids;
 
@@ -824,7 +871,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			}
 
 			// Now import all related Post data.
-			$import_errors = self::$logic->import_post_data( $post_id_new, $post_data, $category_term_id_updates );
+			$import_errors = self::$logic->import_post_data( $post_id_new, $post_data, $hierarchical_taxonomy_term_id_updates );
 			if ( ! empty( $import_errors ) ) {
 				$msg = sprintf( 'Errors during import post_type=%s, id_old=%d, id_new=%d :', $post_type, $post_id_live, $post_id_new );
 				foreach ( $import_errors as $import_error ) {
