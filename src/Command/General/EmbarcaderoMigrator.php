@@ -5,18 +5,22 @@ namespace NewspackCustomContentMigrator\Command\General;
 use DateTimeZone;
 use DOMDocument;
 use Exception;
-use NewspackCustomContentMigrator\Command\General\TaxonomyMigrator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\ConsoleOutput\Users as UserConsoleOutput;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\CSVFile;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
+use NewspackCustomContentMigrator\Utils\ConsoleColor;
+use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlusDataFixer;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
 use WP;
 use WP_CLI;
+use WP_User;
 
 /**
  * This class implements the logic for migrating content from Embarcadero custom CMS.
@@ -332,6 +336,11 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	private $site_timezone;
 
 	/**
+	 * @var CoAuthorPlusDataFixer $cap_data_fixer
+	 */
+	private $cap_data_fixer;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -340,6 +349,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$this->taxonomy_logic            = new Taxonomy();
 		$this->coauthorsplus_logic       = new CoAuthorPlus();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
+		$this->cap_data_fixer = new CoAuthorPlusDataFixer();
 
 		$this->site_timezone = new DateTimeZone( 'America/Los_Angeles' );
 	}
@@ -1176,6 +1186,49 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'repeating'   => false,
 						'default'     => 0,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-csv-path',
+						'description' => 'Path to the CSV file containing the stories.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-cleanup-author-terms',
+			[ $this, 'cmd_cleanup_author_terms' ],
+			[
+				'shortdesc' => 'Looks through `author` record in the DB and ensures they\'re valid',
+				'synopsis'  => [],
+			],
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-validate-post-authors',
+			[ $this, 'cmd_validate_authors_on_posts' ],
+			[
+				'shortdesc' => 'Validates authors on posts.',
+				'synopsis'  => [
+					[
+						'type'        => 'positional',
+						'name'        => 'story-csv-path',
+						'description' => 'Path to the CSV file containing the stories.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-qa-cap-validation',
+			[ $this, 'cmd_qa_cap_validation' ],
+			[
+				'shortdesc' => 'QA File generator.',
+				'synopsis'  => [
 					[
 						'type'        => 'assoc',
 						'name'        => 'story-csv-path',
@@ -4382,6 +4435,1169 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * This script will go through all author terms on Embarcadero's site and update author term descriptions where
+	 * necessary, and delete any terms where the corresponding user no longer exists.
+	 *
+	 * @return void
+	 */
+	public function cmd_cleanup_author_terms() {
+		global $wpdb;
+
+		$user_console_output = new UserConsoleOutput();
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$author_terms = $wpdb->get_results(
+			"SELECT 
+    			t.term_id, 
+    			tt.term_taxonomy_id, 
+    			t.name,
+    			t.slug,
+    			tt.taxonomy,
+    			tt.description
+			FROM $wpdb->terms t 
+			    INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+			WHERE tt.taxonomy = 'author'"
+		);
+
+		foreach ( $author_terms as $author_term ) {
+			echo "\n\n\n";
+			ConsoleTable::output_data( [ $author_term ], [], 'Term Data' );
+			$user_id = $this->cap_data_fixer->extract_id_from_author_term_description( $author_term->description );
+
+			$capless_slug = preg_replace( '#^cap\-#', '', $author_term->slug );
+
+			$capless_user = get_user_by( 'slug', $capless_slug );
+
+			if ( ! $user_id ) {
+				ConsoleColor::yellow( 'Invalid User ID' )->output();
+			} else {
+				ConsoleColor::white( 'Extracted User ID' )->underlined_bright_white( $user_id )->output();
+			}
+
+			ConsoleColor::white( 'Slug/Nicename' )->underlined_bright_white( $capless_slug )->output();
+
+			if ( $capless_user ) {
+				$user_console_output->output_users_table( [ $capless_user ], 'User By Slug' );
+
+				if ( $user_id ) {
+					if ( $capless_user->ID !== $user_id ) {
+
+						$user_by_id = get_user_by( 'ID', $user_id );
+
+						if ( ! $user_by_id ) {
+							$console = ConsoleColor::cyan( 'Updating description on term to' )->underlined_bright_cyan(
+								$this->cap_data_fixer->get_author_term_description( $capless_user )
+							);
+
+							$updated = $this->cap_data_fixer->update_author_term_description( $capless_user, $author_term );
+
+							if ( $updated ) {
+								$console->bright_green( 'OK' )->output();
+							} else {
+								$console->bright_red( 'Failed' )->output();
+							}
+							continue;
+						} else {
+							$user_console_output->output_users_table( [ $user_by_id ], 'User By ID (in slug)' );
+							$email = $this->cap_data_fixer->extract_email_from_author_term_description( $author_term->description );
+
+							if ( $email === $user_by_id->user_email ) {
+								ConsoleColor::bright_green( 'OK' )->output();
+								continue;
+							} else {
+								$console = ConsoleColor::cyan( 'Updating description on term to' )->underlined_bright_cyan(
+									$this->cap_data_fixer->get_author_term_description( $capless_user )
+								);
+
+								$updated = $this->cap_data_fixer->update_author_term_description( $capless_user, $author_term );
+
+								if ( $updated ) {
+									$console->bright_green( 'OK' )->output();
+								} else {
+									$console->bright_red( 'Failed' )->output();
+								}
+								continue;
+							}
+						}
+					} else {
+						ConsoleColor::bright_green( 'OK' )->output();
+						continue;
+					}
+				}
+			}
+
+			$user = get_user_by( 'ID', $user_id );
+
+			if ( $user ) {
+				$user_console_output->output_users_table( [ $user ], 'User By ID' );
+				$email = $this->cap_data_fixer->extract_email_from_author_term_description( $author_term->description );
+
+				if ( $email === $user->user_email ) {
+					ConsoleColor::bright_green( 'OK' )->output();
+					continue;
+				}
+			}
+
+			ConsoleColor::magenta( 'Deleting term data' )->output();
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$maybe_deleted_relationships = $wpdb->delete(
+				$wpdb->term_relationships,
+				[
+					'term_taxonomy_id' => $author_term->term_taxonomy_id,
+				]
+			);
+
+			if ( false !== $maybe_deleted_relationships ) {
+				ConsoleColor::white( 'Term Relationships:' )->bright_green( 'Deleted' )->output();
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$maybe_deleted_term_taxonomies = $wpdb->delete(
+					$wpdb->term_taxonomy,
+					[
+						'term_taxonomy_id' => $author_term->term_taxonomy_id,
+					]
+				);
+
+				if ( false !== $maybe_deleted_term_taxonomies ) {
+					ConsoleColor::white( 'Term Taxonomies:' )->bright_green( 'Deleted' )->output();
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$maybe_deleted_terms = $wpdb->delete(
+						$wpdb->terms,
+						[
+							'term_id' => $author_term->term_id,
+						]
+					);
+
+					if ( false !== $maybe_deleted_terms ) {
+						ConsoleColor::white( 'Terms:' )->bright_green( 'Deleted' )->output();
+					} else {
+						ConsoleColor::white( 'Terms:' )->bright_red( 'Failed' )->output();
+					}
+				} else {
+					ConsoleColor::white( 'Term Taxonomies:' )->bright_red( 'Failed' )->output();
+				}
+			} else {
+				ConsoleColor::white( 'Term Relationships:' )->bright_red( 'Failed' )->output();
+			}
+		}
+	}
+
+	/**
+	 * This function attempts to validate author related data on posts that were originally imported from Publisher
+	 * provided CSV files.
+	 *
+	 * @param array $args Positional arguments.
+	 *
+	 * @return void
+	 * @throws Exception Throws exception if the provided CSV files don't exist.
+	 */
+	public function cmd_validate_authors_on_posts( array $args ) {
+		$import_file = $args[0];
+
+		global $wpdb;
+
+		$staff_account_ids = [
+			/*6709,*/ // Palo Alto Online
+			1770, // Pleasanton Weekly
+			1795, // Pleasanton Weekly
+		];
+
+		$validation_meta_key = '_newspack_embarcadero_cap_data_validation_status';
+
+		$completed_meta_values = [
+			'validated',
+			'skipped',
+			'manual_review_required',
+			'failed',
+		];
+
+		$prepared_meta_placeholders = implode( ', ', array_fill( 0, count( $completed_meta_values ), '%s' ) );
+
+		// phpcs:disable -- Need an uncached query, and this has been properly escaped.
+		$processed_post_ids = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value IN ( $prepared_meta_placeholders )",
+				$validation_meta_key,
+				...$completed_meta_values
+			),
+			OBJECT_K
+		);
+		// phpcs:enable
+
+		$manual_slug_map_override = [
+			/* Palo Alto Online
+			'cap-chris-kenrick'    => 'cap-christina-kenrick',
+			'cap-by-chris-kenrick' => 'cap-christina-kenrick',
+			'cap-rebecca-wallace'  => 'cap-rwallace',
+			'cap-jay-thorwaldson'  => 'cap-jthorwaldson',
+			'cap-tyler-hanley'     => 'cap-palo-alto-online-staff',
+			'cap-gennady-sheyner'  => 'gennady-sheyner',
+			'cap-kelly-jones'      => 'cap-kelly-jones-2',*/
+			/* Pleasanton Weekly */
+			'cap-jeb-bing'      => 'cap-jbingembarcaderopublishing-com',
+			'cap-staff-reports' => 'cap-staff',
+		];
+
+		foreach ( ( new FileImportFactory() )->get_file( $import_file )->getIterator() as $row ) {
+			$console = ConsoleColor::white( 'Original ID' )->bright_white( $row['story_id'] );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$post = $wpdb->get_row(
+				$wpdb->prepare(
+					"SELECT p.* FROM $wpdb->posts p INNER JOIN $wpdb->postmeta pm ON p.ID = pm.post_id WHERE pm.meta_key = %s AND pm.meta_value = %d",
+					self::EMBARCADERO_ORIGINAL_ID_META_KEY,
+					$row['story_id']
+				)
+			);
+
+			if ( ! $post ) {
+				$console->output();
+				ConsoleColor::yellow( 'Could not find post with original ID' )->output();
+				echo "\n\n\n";
+				continue;
+			}
+
+			if ( array_key_exists( $post->ID, $processed_post_ids ) ) {
+				continue;
+			}
+
+			echo "\n\n\n";
+			$console->white( 'Post ID' )->bright_white( $post->ID )->output();
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$author_terms          = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description 
+					FROM $wpdb->terms t 
+					    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+					    LEFT JOIN $wpdb->term_relationships tr ON tr.term_taxonomy_id = tt.term_taxonomy_id 
+					WHERE tt.taxonomy = 'author' 
+					  AND tr.object_id = %d",
+					$post->ID
+				)
+			);
+			$count_of_author_terms = count( $author_terms );
+
+			$empty_byline = empty( trim( $row['byline'] ) );
+
+			if ( $count_of_author_terms > 0 && $empty_byline ) {
+				$filtered_author_terms = array_filter(
+					$author_terms,
+					function ( $term ) use ( $staff_account_ids ) {
+						return ! in_array( $this->cap_data_fixer->extract_id_from_author_term_description( $term->description ), $staff_account_ids, true );
+					}
+				);
+
+				if ( ! empty( $filtered_author_terms ) ) {
+					ConsoleColor::magenta( 'Byline is empty, but there are authors assigned to the post' )->output();
+					ConsoleTable::output_data( $filtered_author_terms, array_keys( (array) $filtered_author_terms[0] ) );
+					$prompt = $this->ask( 'Would you like to (v)alidate, (s)kip, or (h)alt execution?' );
+
+					switch ( $prompt ) {
+						case 'v':
+							update_post_meta( $post->ID, $validation_meta_key, 'validated' );
+							break;
+						case 's':
+							update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
+							break;
+						default:
+							die();
+					}
+				} else {
+					ConsoleColor::yellow( 'Byline is empty, assigned to staff account(s)' )->output();
+					update_post_meta( $post->ID, $validation_meta_key, 'validated' );
+
+				}
+
+				continue;
+			} elseif ( 0 === $count_of_author_terms && ! $empty_byline ) {
+				$console->bright_magenta( 'Byline is not empty, but there are no authors assigned to the post' )->underlined_bright_magenta( $row['byline'] )->output();
+				// Check if there is an exact match for the byline as is.
+				$cap_byline = 'cap-' . sanitize_title( $row['byline'] );
+				ConsoleColor::white( 'Direct Search Slug:' )->bright_white( $cap_byline )->output();
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$author_term = $wpdb->get_row(
+					$wpdb->prepare(
+						"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description 
+						FROM $wpdb->terms t INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+						WHERE tt.taxonomy = 'author' AND t.slug = %s",
+						$cap_byline
+					)
+				);
+
+				if ( $author_term ) {
+					ConsoleColor::white( 'Author Term Found' )->output();
+					ConsoleTable::output_data( [ $author_term ], [ 'name', 'slug', 'description' ] );
+
+					$user_id = $this->cap_data_fixer->extract_id_from_author_term_description( $author_term->description );
+
+					if ( ! $user_id ) {
+						ConsoleColor::yellow( 'Invalid User ID' )->output();
+						update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
+						continue;
+					} else {
+						ConsoleColor::white( 'Extracted User ID' )->underlined_bright_white( $user_id )->output();
+					}
+
+					$user = get_user_by( 'ID', $user_id );
+
+					if ( ! $user ) {
+						ConsoleColor::yellow( 'User not found' )->output();
+						update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
+						continue;
+					}
+
+					UserConsoleOutput::output_users_table( [ $user ] );
+
+					$prompt = $this->ask( 'Would you like to (v)alidate or (s)kip this record, or perhaps (c)ontinue or (h)alt execution?' );
+
+					if ( 'v' === $prompt ) {
+						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+						$maybe_author_assigned = $wpdb->insert(
+							$wpdb->term_relationships,
+							[
+								'object_id'        => $post->ID,
+								'term_taxonomy_id' => $author_term->term_taxonomy_id,
+							]
+						);
+
+						if ( false !== $maybe_author_assigned ) {
+							if ( $user && intval( $post->post_author ) !== intval( $user->ID ) ) {
+								// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+								$maybe_post_author_updated = $wpdb->update(
+									$wpdb->posts,
+									[
+										'post_author' => $user->ID,
+									],
+									[
+										'ID' => $post->ID,
+									]
+								);
+
+								$console = ConsoleColor::white( 'Post Author Updated' );
+								if ( false !== $maybe_post_author_updated ) {
+									$console->bright_green( 'OK' )->output();
+								} else {
+									$console->bright_red( 'Failed' )->output();
+								}
+							}
+
+							ConsoleColor::white( 'Author Assigned' )->bright_green( 'OK' )->output();
+							update_post_meta( $post->ID, $validation_meta_key, 'validated' );
+						} else {
+							ConsoleColor::white( 'Author Assigned' )->bright_red( 'Failed' )->output();
+							update_post_meta( $post->ID, $validation_meta_key, 'failed' );
+						}
+
+						continue;
+					} elseif ( 's' === $prompt ) {
+						update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
+						continue;
+					} elseif ( 'h' === $prompt ) {
+						die();
+					}
+				}
+
+				$byline_authors = $this->get_co_authors_from_bylines( $row['byline'] );
+				if ( empty( $byline_authors ) ) {
+					ConsoleColor::yellow( 'No authors found in byline' )->output();
+					update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
+					continue;
+				}
+
+				$authors_assigned = true;
+				foreach ( $byline_authors as $author_name ) {
+					$slug = 'cap-' . sanitize_title( $author_name );
+					ConsoleColor::white( 'Author Name' )->bright_white( $author_name )
+								->white( 'Search Slug' )->bright_white( $slug )
+								->output();
+
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$regex_author_term = $wpdb->get_row(
+						$wpdb->prepare(
+							"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description 
+							FROM $wpdb->terms t 
+								LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+							WHERE REGEXP_LIKE( t.slug, %s ) ORDER BY t.slug ASC",
+							$slug . '[-\d+]?'
+						)
+					);
+
+					if ( ! $regex_author_term ) {
+						ConsoleColor::bright_magenta( 'Author Term not found' )->output();
+
+						// Look up author by post_author, and see if wp_term and wp_term_relationship records exists.
+						$post_author_user = get_user_by( 'ID', $post->post_author );
+						if ( ! $post_author_user ) {
+							// Automatically skip, because Author Term doesn't exist, and neither does the Post Author and
+							// we don't want to create new author data.
+							// This should be manually reviewed.
+							ConsoleColor::bright_magenta( 'Manual Review Required' )->underlined_white( get_site_url( null, 'wp-admin/post.php?action=edit&post=' . $post->ID ) )->output();
+							update_post_meta( $post->ID, $validation_meta_key, 'manual_review_required' );
+							continue 2;
+						}
+
+						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+						$author_term_by_post_author = $wpdb->get_row(
+							$wpdb->prepare(
+								"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description 
+								FROM $wpdb->terms t 
+									LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+								WHERE tt.taxonomy = 'author' AND t.slug LIKE %s AND tt.description LIKE %s",
+								'%' . $wpdb->esc_like( $post_author_user->user_nicename ) . '%',
+								'% ' . $post_author_user->ID . ' %'
+							)
+						);
+
+						if ( $author_term_by_post_author ) {
+							ConsoleTable::output_data( [ $author_term_by_post_author ], array_keys( (array) $author_term_by_post_author ), 'Author Term by Post Author' );
+
+							$this->validate_author_term_related_to_post_or_insert( $post->ID, $author_term_by_post_author->term_taxonomy_id );
+						} else {
+							ConsoleColor::bright_magenta( 'Author Term by Post Author not found' )->output();
+						}
+
+						$prompt = $this->ask( 'Would you like to (s)kip or (v)alidate this record, or (h)alt execution' );
+
+						if ( 's' === $prompt ) {
+							update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
+							continue 2;
+						} elseif ( 'v' === $prompt ) {
+							update_post_meta( $post->ID, $validation_meta_key, 'validated' );
+							continue 2;
+						} elseif ( 'h' === $prompt ) {
+							die();
+						}
+					}
+
+					ConsoleColor::white( 'Author Term Found' )->output();
+					ConsoleTable::output_data( [ $regex_author_term ], [ 'name', 'slug', 'description' ] );
+
+					$user_id = $this->cap_data_fixer->extract_id_from_author_term_description( $regex_author_term->description );
+
+					if ( ! $user_id ) {
+						ConsoleColor::yellow( 'Invalid User ID' )->output();
+						update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
+						continue 2;
+					}
+
+					ConsoleColor::white( 'Extracted User ID' )->underlined_bright_white( $user_id )->output();
+
+					$user = get_user_by( 'ID', $user_id );
+
+					if ( ! $user ) {
+						ConsoleColor::yellow( 'User not found' )->output();
+						update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
+						continue 2;
+					}
+
+					UserConsoleOutput::output_users_table( [ $user ] );
+
+					$prompt = $this->ask( 'Would you like to (a)dd this author to this post, (s)kip assigning authors for this post, or (h)alt execution?' );
+
+					if ( 'a' === $prompt ) {
+						// Find current author term rel rows, display them, and then delete.
+						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+						$current_author_term_relationships = $wpdb->get_results(
+							$wpdb->prepare(
+								"SELECT
+    								t.term_id,
+									t.name,
+									t.slug,
+									tt.term_taxonomy_id,
+									tt.taxonomy,
+									tt.description,
+    							FROM $wpdb->terms t 
+    							    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+    							WHERE tt.taxonomy = 'author' AND 
+    							      tt.term_taxonomy_id IN (
+    									SELECT term_taxonomy_id 
+    									FROM $wpdb->term_relationships 
+    									WHERE object_id = %d
+    							)",
+								$post->ID
+							)
+						);
+
+						if ( ! empty( $current_author_term_relationships ) ) {
+							ConsoleTable::output_data(
+								$current_author_term_relationships,
+								array_keys( (array) $current_author_term_relationships[0] ),
+								'Current Author Terms Assigned to Post to be Deleted'
+							);
+
+							$term_taxonomy_ids             = array_map( fn( $rel ) => $rel->term_taxonomy_id, $current_author_term_relationships );
+							$term_taxonomy_id_placeholders = implode( ', ', array_fill( 0, count( $term_taxonomy_ids ), '%d' ) );
+
+							// phpcs:disable
+							$maybe_deleted = $wpdb->query(
+								$wpdb->prepare(
+									"DELETE FROM $wpdb->term_relationships WHERE object_id = %d AND term_taxonomy_id IN ( $term_taxonomy_id_placeholders )",
+									$post->ID,
+									...$term_taxonomy_ids
+								)
+							);
+							// phpcs:enable
+
+							if ( false !== $maybe_deleted ) {
+								ConsoleColor::green( 'RECORDS DELETED' )->output();
+							} else {
+								ConsoleColor::red( 'FAILED TO DELETE RECORDS' )->output();
+							}
+						} else {
+							ConsoleColor::yellow_with_white_background( 'No authors currently assigned?' )->output();
+						}
+
+						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+						$maybe_author_assigned = $wpdb->insert(
+							$wpdb->term_relationships,
+							[
+								'object_id'        => $post->ID,
+								'term_taxonomy_id' => $author_term->term_taxonomy_id,
+							]
+						);
+
+						if ( false !== $maybe_author_assigned ) {
+							ConsoleColor::white( 'Author Assigned' )->bright_green( 'OK' )->output();
+						} else {
+							ConsoleColor::white( 'Author Assigned' )->bright_red( 'Failed' )->output();
+							$authors_assigned = false;
+						}
+					} elseif ( 's' === $prompt ) {
+						update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
+						continue 2;
+					} elseif ( 'h' === $prompt ) {
+						die();
+					}
+				}
+
+				if ( $authors_assigned ) {
+					update_post_meta( $post->ID, $validation_meta_key, 'validated' );
+				}
+
+				continue;
+			}
+
+			ConsoleColor::white( 'Byline:' )->underlined_bright_white( $row['byline'] )
+						->white( 'Posted By:' )->underlined_bright_white( $row['posted_by'] )
+						->white( 'Author Email:' )->underlined_bright_white( $row['author_email'] )
+						->output();
+
+			$byline_authors = $this->get_co_authors_from_bylines( $row['byline'] );
+			$byline_authors = array_map(
+				function ( $author_name ) use ( $manual_slug_map_override ) {
+					$cap_name = 'cap-' . sanitize_title( $author_name );
+
+					return [
+						'name'     => $author_name,
+						'cap-name' => $manual_slug_map_override[ $cap_name ] ?? $cap_name,
+					];
+				},
+				$byline_authors
+			);
+
+			if ( count( $byline_authors ) > count( $author_terms ) ) {
+				ConsoleColor::red( 'More authors in byline than assigned to post, review manually' )
+							->underlined_white( get_site_url( null, 'wp-admin/post.php?action=edit&post=' . $post->ID ) )
+							->output();
+				update_post_meta( $post->ID, $validation_meta_key, 'manual_review_required' );
+				continue;
+			}
+
+			$authors_validated = [];
+			foreach ( $author_terms as $author_term ) {
+				$user_id = $this->cap_data_fixer->extract_id_from_author_term_description( $author_term->description );
+				$user    = get_user_by( 'ID', $user_id );
+
+				if ( ! $user ) {
+					ConsoleTable::output_data( [ $author_term ], [ 'name', 'slug', 'description' ] );
+					ConsoleColor::bright_magenta( 'USER NOT FOUND' )->output();
+				} else {
+					$post_author  = get_user_by( 'id', $post->post_author );
+					$author_found = true;
+
+					if ( ! $post_author ) {
+						$post_author  = new WP_User();
+						$author_found = false;
+					}
+
+					if ( empty( $byline_authors ) ) {
+						ConsoleColor::bright_red( 'No more byline authors, please review, skipping' )->output();
+						continue;
+					}
+
+					$byline_authors = array_map(
+						function ( $byline_author ) use ( $author_term ) {
+							$percent = 0;
+							similar_text( $byline_author['cap-name'], $author_term->slug, $percent );
+							$byline_author['similarity'] = $percent;
+
+							return $byline_author;
+						},
+						$byline_authors
+					);
+
+					usort(
+						$byline_authors,
+						function ( $a, $b ) {
+							return $b['similarity'] <=> $a['similarity'];
+						}
+					);
+
+					$byline_author = array_shift( $byline_authors );
+
+					$author_post_author_slug_comparison           = $this->compare_values(
+						$byline_author['cap-name'],
+						! str_starts_with( $post_author->user_nicename, 'cap-' ) ? "cap-$post_author->user_nicename" : $post_author->user_nicename ?? 'Not Found'
+					);
+					$post_author_wp_user_name_email_comparison    = $this->compare_values( $post_author->user_email, $user->user_email );
+					$post_author_wp_user_slug_nicename_comparison = $this->compare_values(
+						! str_starts_with( $post_author->user_nicename, 'cap-' ) ? "cap-$post_author->user_nicename" : $post_author->user_nicename ?? 'Not Found',
+						! str_starts_with( $user->user_nicename, 'cap-' ) ? "cap-$user->user_nicename" : $user->user_nicename
+					);
+					$post_author_wp_user_description_comparison   = $this->compare_values(
+						$this->cap_data_fixer->get_author_term_description( $post_author ),
+						$this->cap_data_fixer->get_author_term_description( $user )
+					);
+					$wp_user_author_term_slug_nicename_comparison = $this->compare_values(
+						! str_starts_with( $user->user_nicename, 'cap-' ) ? "cap-$user->user_nicename" : $user->user_nicename,
+						$author_term->slug
+					);
+					$wp_user_author_term_description_comparison   = $this->compare_values(
+						$this->cap_data_fixer->get_author_term_description( $user ),
+						$author_term->description
+					);
+
+					ConsoleTable::output_comparison(
+						[
+							'_',
+							'name/email',
+							'slug/nicename',
+							'description',
+						],
+						[
+							'_'             => 'CSV Author',
+							'name/email'    => '-',
+							'slug/nicename' => $byline_author['cap-name'],
+							'description'   => $row['byline'],
+						],
+						[
+							'_'             => '-',
+							'name/email'    => '-',
+							'slug/nicename' => $author_post_author_slug_comparison->as_string,
+							'description'   => '-',
+						],
+						[
+							'_'             => 'Post Author',
+							'name/email'    => $post_author->user_email,
+							'slug/nicename' => ! str_starts_with( $post_author->user_nicename, 'cap-' ) ? "cap-$post_author->user_nicename" : $post_author->user_nicename ?? 'Not Found',
+							'description'   => $post_author ? $this->cap_data_fixer->get_author_term_description( $post_author ) : 'Not Found',
+						],
+						[
+							'-'             => '-',
+							'name/email'    => $post_author_wp_user_name_email_comparison->as_string,
+							'slug/nicename' => $post_author_wp_user_slug_nicename_comparison->as_string,
+							'description'   => $post_author_wp_user_description_comparison->as_string,
+						],
+						[
+							'_'             => 'WP User',
+							'name/email'    => $user->user_email,
+							'slug/nicename' => ! str_starts_with( $user->user_nicename, 'cap-' ) ? "cap-$user->user_nicename" : $user->user_nicename,
+							'description'   => $this->cap_data_fixer->get_author_term_description( $user ),
+						],
+						[
+							'_'             => '-',
+							'name/email'    => '-',
+							'slug/nicename' => $wp_user_author_term_slug_nicename_comparison->as_string,
+							'description'   => $wp_user_author_term_description_comparison->as_string,
+						],
+						[
+							'_'             => 'Author Term',
+							'name/email'    => $author_term->name,
+							'slug/nicename' => $author_term->slug,
+							'description'   => $author_term->description,
+						],
+					);
+
+					// Happy Path.
+					$all_good = [
+						$author_post_author_slug_comparison->as_bool,
+						$post_author_wp_user_name_email_comparison->as_bool,
+						$post_author_wp_user_slug_nicename_comparison->as_bool,
+						$post_author_wp_user_description_comparison->as_bool,
+						$wp_user_author_term_slug_nicename_comparison->as_bool,
+						$wp_user_author_term_description_comparison->as_bool,
+					];
+					$all_good = array_reduce( $all_good, fn( $carry, $item ) => $carry && $item, true );
+
+					if ( 1 === $count_of_author_terms ) {
+						if ( ! $all_good ) {
+							// Sometimes the author term description is not correct, but if everything else is all good,
+							// we should consider the record properly set and validated.
+							$all_good = [
+								$author_post_author_slug_comparison->as_bool,
+								$post_author_wp_user_name_email_comparison->as_bool,
+								$post_author_wp_user_slug_nicename_comparison->as_bool,
+								$post_author_wp_user_description_comparison->as_bool,
+								$wp_user_author_term_slug_nicename_comparison->as_bool,
+							];
+
+							$all_good = array_reduce( $all_good, fn( $carry, $item ) => $carry && $item, true );
+						}
+
+						if ( $all_good ) {
+							update_post_meta( $post->ID, $validation_meta_key, 'validated' );
+							ConsoleColor::bright_white_with_green_background( 'All Good' )->output();
+							continue 2;
+						}
+					}
+
+					$author_author_term_slug_nicename_comparison = $this->compare_values( $byline_author['cap-name'], $author_term->slug );
+					if (
+						! $author_post_author_slug_comparison->as_bool &&
+						$post_author_wp_user_slug_nicename_comparison->as_bool &&
+						$wp_user_author_term_slug_nicename_comparison->as_bool
+					) {
+
+						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+						$close_match_author_term = $wpdb->get_row(
+							$wpdb->prepare(
+								"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description 
+							FROM $wpdb->terms t 
+								LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+							WHERE tt.taxonomy = 'author' AND t.slug = %s",
+								$byline_author['cap-name']
+							)
+						);
+
+						if ( ! $close_match_author_term ) {
+							// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+							$close_match_author_term = $wpdb->get_row(
+								$wpdb->prepare(
+									"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description 
+							FROM $wpdb->terms t 
+								LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+							WHERE tt.taxonomy = 'author' AND REGEXP_LIKE( t.slug, %s ) ORDER BY t.slug ASC",
+									$byline_author['cap-name'] . '[-\d+]?'
+								)
+							);
+						}
+
+						if ( $close_match_author_term && $close_match_author_term->term_taxonomy_id !== $author_term->term_taxonomy_id ) {
+							ConsoleTable::output_data( [ $close_match_author_term ], array_keys( (array) $close_match_author_term ), 'Close Matching Author Term' );
+
+							$extracted_user_id = $this->cap_data_fixer->extract_id_from_author_term_description( $close_match_author_term->description );
+							$extracted_user    = null;
+
+							$options = '(s)kip/(c)ontinue';
+
+							if ( $extracted_user_id ) {
+								$extracted_user = get_user_by( 'id', $extracted_user_id );
+								ConsoleTable::output_data( [ $extracted_user->data ], [], 'Close Matching User Record' );
+								$options = "(y)es/$options";
+							}
+
+							$prompt = $this->ask( "Would you like to use this Author Term to associate to this post? [$options]" );
+
+							if ( ! $extracted_user ) {
+								if ( 's' === $prompt ) {
+									ConsoleColor::yellow( 'Skipping...' )->output();
+									update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
+									continue 2;
+								}
+
+								$authors_validated[] = false;
+							} else {
+								if ( 'y' === $prompt ) {
+									// Need to assign user to wp_posts, delete old author term rel record, insert new author term rel record.
+									// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+									$perhaps_post_author_updated = $wpdb->update(
+										$wpdb->posts,
+										[
+											'post_author' => $extracted_user->ID,
+										],
+										[
+											'ID' => $post->ID,
+										]
+									);
+
+									if ( $perhaps_post_author_updated ) {
+										ConsoleColor::green( 'Post Author Updated' )->output();
+										// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+										$maybe_rel_deleted = $wpdb->delete(
+											$wpdb->term_relationships,
+											[
+												'object_id'        => $post->ID,
+												'term_taxonomy_id' => $author_term->term_taxonomy_id,
+											]
+										);
+
+										if ( false !== $maybe_rel_deleted ) {
+											ConsoleColor::green( 'Old Author Term Relationship Deleted' )->output();
+											// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+											$maybe_new_rel_inserted = $wpdb->insert(
+												$wpdb->term_relationships,
+												[
+													'object_id'        => $post->ID,
+													'term_taxonomy_id' => $close_match_author_term->term_taxonomy_id,
+												]
+											);
+
+											if ( false !== $maybe_new_rel_inserted ) {
+												ConsoleColor::green( 'New Author Term Relationship Successfully Inserted' )->output();
+												$authors_validated[] = true;
+												continue;
+											} else {
+												ConsoleColor::red( 'New Author Term Relationship Insertion Failed' )->output();
+											}
+										} else {
+											ConsoleColor::red( 'Old Author Term Relationship Deletion Failed' )->output();
+										}
+									} else {
+										ConsoleColor::red( 'Post Author Update Failed' )->output();
+									}
+									$authors_validated[] = false;
+								} elseif ( 's' === $prompt ) {
+									ConsoleColor::yellow( 'Skipping...' )->output();
+									update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
+									continue 2;
+								} elseif ( 'c' === $prompt ) {
+									$authors_validated[] = false;
+								}
+							}
+						} else {
+							$prompt = $this->ask( 'Would you like to (s)kip this record, (c)ontinue, or (h)alt execution?' );
+
+							if ( 's' === $prompt ) {
+								update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
+								continue 2;
+							} elseif ( 'h' === $prompt ) {
+								die();
+							}
+						}
+					} elseif ( $count_of_author_terms > 1 && $all_good ) {
+						ConsoleColor::yellow_with_blue_background( 'Multiple authors assigned to post, and CSV Byline Author match' )->output();
+						$authors_validated[] = true;
+					} elseif (
+						$count_of_author_terms > 1 &&
+						$author_author_term_slug_nicename_comparison->as_bool &&
+						! $author_post_author_slug_comparison->as_bool &&
+						$wp_user_author_term_slug_nicename_comparison->as_bool
+					) {
+						ConsoleColor::yellow_with_blue_background( 'Multiple authors assigned to post, and CSV Byline Author match' )->output();
+						$authors_validated[] = true;
+					} elseif (
+						1 === $count_of_author_terms &&
+						$author_author_term_slug_nicename_comparison->as_bool &&
+						! $author_post_author_slug_comparison->as_bool
+					) {
+
+						$prompt = $this->ask( 'Would you like to use Author Term-WP User to update Post Author? [(y)es/(n)o]' );
+
+						if ( 'y' === $prompt ) {
+							// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+							$maybe_post_author_updated = $wpdb->update(
+								$wpdb->posts,
+								[
+									'post_author' => $user->ID,
+								],
+								[
+									'ID' => $post->ID,
+								]
+							);
+
+							if ( false !== $maybe_post_author_updated ) {
+								ConsoleColor::white( 'Post Author Updated' )->bright_green( 'OK' )->output();
+								$authors_validated[] = true;
+							} else {
+								ConsoleColor::white( 'Post Author Updated' )->bright_red( 'Failed' )->output();
+								$authors_assigned[] = false;
+							}
+						} else {
+							update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
+							continue 2;
+						}
+					} elseif ( $author_post_author_slug_comparison->as_bool && $author_found ) {
+						$prompt = $this->ask( 'Would you like to use Post Author to update Author Term so that they match? [(y)es/(n)o]' );
+
+						if ( 'y' === $prompt ) {
+							$post_author_slug = ! str_starts_with( $post_author->user_nicename, 'cap-' ) ? "cap-$post_author->user_nicename" : $post_author->user_nicename;
+							ConsoleColor::white( 'Searching for slug:' )->bright_white( $post_author_slug )->output();
+							// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+							$post_author_author_term = $wpdb->get_row(
+								$wpdb->prepare(
+									"SELECT t.term_id, tt.term_taxonomy_id, tt.description
+										FROM $wpdb->terms t INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+										WHERE tt.taxonomy = 'author' AND t.slug = %s",
+									$post_author_slug
+								)
+							);
+
+							if ( $post_author_author_term ) {
+								ConsoleColor::white( 'Term ID:' )->bright_white( $post_author_author_term->term_id )
+											->white( 'Term Taxonomy ID:' )->bright_white( $post_author_author_term->term_taxonomy_id )
+											->white( 'Term Description' )->bright_white( $post_author_author_term->description )
+											->output();
+								ConsoleColor::white( 'Inserting Term Relationship' )->output();
+								// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+								$maybe_author_term_inserted = $wpdb->insert(
+									$wpdb->term_relationships,
+									[
+										'object_id'        => $post->ID,
+										'term_taxonomy_id' => $post_author_author_term->term_taxonomy_id,
+									]
+								);
+
+								if ( false !== $maybe_author_term_inserted ) {
+									ConsoleColor::white( 'Author Term Inserted' )->bright_green( 'OK' )->output();
+									ConsoleColor::white( 'Deleting old Author Relationship' )
+												->white( 'Term Taxonomy ID:' )->underlined_white( $author_term->term_taxonomy_id )
+												->output();
+
+									// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+									$maybe_deleted_relationships = $wpdb->delete(
+										$wpdb->term_relationships,
+										[
+											'term_taxonomy_id' => $author_term->term_taxonomy_id,
+											'object_id'        => $post->ID,
+										]
+									);
+
+									if ( false !== $maybe_deleted_relationships ) {
+										ConsoleColor::white( 'Term Relationships:' )->bright_green( 'Deleted' )->output();
+										$authors_validated[] = true;
+									}
+								}
+							}
+						} else {
+							update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
+							continue;
+						}
+					} else {
+						$authors_validated[] = false;
+					}
+				}
+			}
+			$initial           = array_shift( $authors_validated );
+			$authors_validated = array_reduce( $authors_validated, fn( $carry, $current ) => $carry && $current, $initial );
+			if ( $authors_validated ) {
+				update_post_meta( $post->ID, $validation_meta_key, 'validated' );
+			} else {
+				update_post_meta( $post->ID, $validation_meta_key, 'failed' );
+			}
+		}
+	}
+
+	/**
+	 * This function generates a CSV file for QA purposes that checks which authors are assigned to a particular post.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws Exception Throws exception if the file doesn't exist.
+	 */
+	public function cmd_qa_cap_validation( array $args, array $assoc_args ) {
+		// switch to use either file or DB data (postmeta generated from CAP validation command).
+		// create QA file.
+		// for each post, use get_coauthors() function, record wp_post.post_author user.
+		// for each author returned, record in qa file nicename, email, and display_name.
+		global $wpdb;
+
+		$file_path = $assoc_args['story-csv-path'] ?? null;
+
+		$iterable = [];
+
+		if ( $file_path ) {
+			$iterable = ( new FileImportFactory() )->get_file( $file_path )->getIterator();
+		} else {
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$iterable = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT post_id 
+					FROM $wpdb->postmeta 
+					WHERE meta_key = %s 
+					  AND meta_value IN ('validated')",
+					'_newspack_embarcadero_cap_data_validation_status',
+				)
+			);
+		}
+
+		$qa_filename = null === $file_path ? 'qa_file_db.csv' : 'qa_file_import_csv.csv';
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- just need a quick and easy way to do this.
+		$qa_file = fopen( $qa_filename, 'w' );
+		$header  = [
+			'story_id'                 => null,
+			'post_id'                  => null,
+			'post_author_id'           => null,
+			'post_author_nicename'     => null,
+			'post_author_email'        => null,
+			'post_author_display_name' => null,
+			'author_nicename'          => null,
+			'author_email'             => null,
+			'author_display_name'      => null,
+		];
+		fputcsv(
+			$qa_file,
+			array_keys( $header )
+		);
+
+		foreach ( $iterable as $row ) {
+			$qa_row   = $header;
+			$story_id = null;
+			$post_id  = null;
+
+			if ( null === $file_path ) {
+				$post_id = $row->post_id;
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$story_id = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = %s AND post_id = %d",
+						self::EMBARCADERO_ORIGINAL_ID_META_KEY,
+						$row->post_id
+					)
+				);
+			} else {
+				$story_id = $row['story_id'];
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$post_id = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %d",
+						self::EMBARCADERO_ORIGINAL_ID_META_KEY,
+						$row['story_id']
+					)
+				);
+			}
+
+			$qa_row['story_id'] = $story_id;
+			$qa_row['post_id']  = $post_id;
+
+			if ( null === $post_id ) {
+				fputcsv(
+					$qa_file,
+					array_values(
+						$qa_row
+					)
+				);
+				continue;
+			}
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$post        = $wpdb->get_row(
+				$wpdb->prepare(
+					"SELECT * FROM $wpdb->posts WHERE ID = %d",
+					$post_id
+				)
+			);
+			$post_author = get_user_by( 'id', $post->post_author );
+
+			$qa_row['post_author_id']           = $post->post_author;
+			$qa_row['post_author_nicename']     = $post_author->user_nicename;
+			$qa_row['post_author_email']        = $post_author->user_email;
+			$qa_row['post_author_display_name'] = $post_author->display_name;
+
+			$authors = get_coauthors( $post_id );
+
+			foreach ( $authors as $author ) {
+				$qa_row['author_nicename']     = $author->user_nicename;
+				$qa_row['author_email']        = $author->user_email;
+				$qa_row['author_display_name'] = $author->display_name;
+			}
+
+			fputcsv( $qa_file, $qa_row );
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- just need a quick and easy way to do this.
+		fclose( $qa_file );
+	}
+
+	/**
+	 * Comparator function to help with comparing two values and responding with either bool or text meant for console
+	 * output.
+	 *
+	 * @param mixed $value1 The first value to compare.
+	 * @param mixed $value2 The second value to compare.
+	 *
+	 * @return object
+	 */
+	private function compare_values( mixed $value1, mixed $value2 ): object {
+		$compare = $value1 === $value2;
+
+		$return_obj            = new \stdClass();
+		$return_obj->as_string = null;
+		$return_obj->as_bool   = null;
+		if ( false === $compare ) {
+			if ( $this->string_contained_within( $value1, $value2 ) ) {
+				$return_obj->as_string = '❕';
+			} else {
+				$return_obj->as_string = '❌';
+				$return_obj->as_bool   = false;
+			}
+
+			return $return_obj;
+		}
+
+		$return_obj->as_string = '✅';
+		$return_obj->as_bool   = true;
+
+		return $return_obj;
+	}
+
+	/**
+	 * Convenience function that determines if a string is contained within another string.
+	 *
+	 * @param string $value1 The first string.
+	 * @param string $value2 The second string.
+	 *
+	 * @return bool
+	 */
+	private function string_contained_within( string $value1, string $value2 ): bool {
+		return str_contains( $value2, $value1 ) || str_contains( $value1, $value2 );
+	}
+
+	/**
+	 * This function checks whether a term is directly related to a post via the wp_term_relationships table.
+	 * If it isn't, then the relationship is inserted.
+	 *
+	 * @param int $post_id The post ID.
+	 * @param int $term_taxonomy_id The Term Taxonomy ID to check for relation.
+	 *
+	 * @return void
+	 */
+	private function validate_author_term_related_to_post_or_insert( int $post_id, int $term_taxonomy_id ): void {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$related_to_post = $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT * FROM $wpdb->term_relationships WHERE object_id = %d AND term_taxonomy_id = %d",
+				$post_id,
+				$term_taxonomy_id
+			)
+		);
+
+		if ( $related_to_post ) {
+			ConsoleColor::green( 'Author Term by Post Author found and related to post' )->output();
+		} else {
+			$console = ConsoleColor::bright_yellow( 'Author Term by Post Author found, but not related to post. Inserting rel row.' );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$inserted = $wpdb->insert(
+				$wpdb->term_relationships,
+				[
+					'object_id'        => $post_id,
+					'term_taxonomy_id' => $term_taxonomy_id,
+				]
+			);
+
+			if ( $inserted ) {
+				$console->bright_green( 'OK' )->output();
+			} else {
+				$console->bright_red( 'Failed' )->output();
+			}
+		}
+	}
+
+	/**
 	 * Function to save a post's meta data.
 	 *
 	 * @param int   $post_id The post ID.
@@ -4557,7 +5773,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		} else {
 
 			// Set the Contributor role.
-			$user = new \WP_User( $wp_user_id );
+			$user = new WP_User( $wp_user_id );
 			$user->set_role( $role );
 
 			// Set WP User display name.
@@ -5109,5 +6325,18 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		https://www.youtube.com/watch?v=' . $video_id . '
 		</div></figure>
 		<!-- /wp:embed -->';
+	}
+
+	/**
+	 * Convenience function to handle interactive CLI prompts.
+	 *
+	 * @param string $question
+	 *
+	 * @return string
+	 */
+	private function ask( string $question ): string {
+		fwrite( STDOUT, "$question: " );
+
+		return strtolower( trim( fgets( STDIN ) ) );
 	}
 }
