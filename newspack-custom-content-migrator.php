@@ -96,5 +96,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\LAFocusMigrator::class,
 		Command\PublisherSpecific\TheFifthEstateMigrator::class,
 		Command\PublisherSpecific\ArkansasTimesMigrator::class,
+		Command\PublisherSpecific\ZocaloMigrator::class,
 	)
 );
