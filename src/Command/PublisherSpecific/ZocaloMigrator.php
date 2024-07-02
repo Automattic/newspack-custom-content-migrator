@@ -19,14 +19,7 @@ class ZocaloMigrator implements InterfaceCommand {
 	private Logger $logger;
 
 	private function __construct() {
-		$this->coauthorsplus_logic = new CoAuthorPlus();
-		$this->logger              = new Logger();
-		$this->default_author_id   = $this->coauthorsplus_logic->create_guest_author(
-			[
-				'display_name' => 'Zócalo Public Square',
-				'user_login'   => 'zocalo-public-square',
-			]
-		);
+		// Nothing.
 	}
 
 	/**
@@ -44,20 +37,25 @@ class ZocaloMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Do some quick sanity checks before running the commands.
+	 * Do some quick sanity checks and setup before running the commands.
 	 *
 	 * @throws ExitException
 	 */
-	public function check_requirements(): void {
-		static $checked = false;
-		if ( $checked ) {
-			// It looks like this gets called at least more than once pr. run, so bail if we already checked.
+	public function preflight(): void {
+		static $has_run = false;
+		if ( $has_run ) {
+			// It looks like this gets called at least more than once pr. run, so bail if we already ran.
 			return;
 		}
+
+		$this->coauthorsplus_logic = new CoAuthorPlus();
+		$this->logger              = new Logger();
+
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
 			WP_CLI::error( '"Co-Authors Plus" plugin not found. Install and activate it before using the migration commands.' );
 		}
-		$checked = true;
+
+		$has_run = true;
 	}
 
 	/**
@@ -66,7 +64,7 @@ class ZocaloMigrator implements InterfaceCommand {
 	public function register_commands(): void {
 		$generic_args = [
 			'synopsis'      => '[--post-id=<post-id>] [--dry-run] [--num-items=<num-items>] [--refresh-existing]',
-			'before_invoke' => [ $this, 'check_requirements' ],
+			'before_invoke' => [ $this, 'preflight' ],
 		];
 
 		WP_CLI::add_command(
@@ -93,8 +91,8 @@ class ZocaloMigrator implements InterfaceCommand {
 			'version' => 1,
 			'key'     => 'import_sub_titles',
 		];
-		$meta_key       = 'sub_title';
 
+		$meta_key = 'sub_title';
 
 		foreach ( $this->get_published_posts_with_meta_key( $meta_key, $assoc_args, $migration_meta ) as $post ) {
 			$sub_title = trim( get_post_meta( $post->ID, $meta_key, true ) );
@@ -109,6 +107,13 @@ class ZocaloMigrator implements InterfaceCommand {
 	}
 
 	public function cmd_import_post_authors( array $pos_args, array $assoc_args ): void {
+
+		$this->default_author_id = $this->coauthorsplus_logic->create_guest_author(
+			[
+				'display_name' => 'Zócalo Public Square',
+				'user_login'   => 'zocalo-public-square',
+			]
+		);
 
 		$migration_meta = [
 			'version' => 1,
