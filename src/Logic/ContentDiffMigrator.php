@@ -1075,8 +1075,15 @@ class ContentDiffMigrator {
 				// Insert the Term Relationship record.
 				$this->insert_term_relationship( $post_id, $local_term_taxonomy_id );
 
-				// Increment wp_term_taxonomy.count.
-				$this->wpdb->update( $this->wpdb->term_taxonomy, [ 'count' => ( (int) $local_term_taxonomy_count + 1 ) ], [ 'term_taxonomy_id' => $local_term_taxonomy_id ] );
+				// Increment wp_term_taxonomy.count, and update wp_term_taxonomy.description.
+				$this->wpdb->update(
+					$this->wpdb->term_taxonomy,
+					[
+						'count'       => ( (int) $local_term_taxonomy_count + 1 ),
+						'description' => $live_term_taxonomy_row['description'],
+					],
+					[ 'term_taxonomy_id' => $local_term_taxonomy_id ]
+				);
 
 				$inserted_term_taxonomy_ids[] = $local_term_taxonomy_id;
 			}
