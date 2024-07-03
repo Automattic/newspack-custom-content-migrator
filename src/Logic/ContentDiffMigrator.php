@@ -1036,7 +1036,7 @@ class ContentDiffMigrator {
 				if ( is_null( $local_term_taxonomy_data ) || empty( $local_term_taxonomy_data ) ) {
 
 					// Create a new Term.
-					$term_insert_result = $this->wp_insert_term( $live_term_name, $live_term_taxonomy_row['taxonomy'] );
+					$term_insert_result = $this->wp_insert_term( $live_term_name, $live_term_taxonomy_row['taxonomy'], [ 'description' => $live_term_taxonomy_row['description'] ] );
 					if ( is_wp_error( $term_insert_result ) ) {
 						$error_messages[] = sprintf(
 							"Error occurred while inserting %s '%s' live_term_id=%s at live_post_ID=%s :%s",
