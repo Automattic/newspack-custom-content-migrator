@@ -540,20 +540,17 @@ class ContentDiffMigrator implements InterfaceCommand {
 			$custom_taxonomies_live = $wpdb->get_col( "SELECT DISTINCT( taxonomy ) FROM {$live_table_prefix_escaped}term_taxonomy WHERE taxonomy NOT IN ('category', 'post_tag') ;" );
 			WP_CLI::log( sprintf( 'These unique custom taxonomies exist in live DB:%s', "\n- " . implode( "\n- ", $custom_taxonomies_live ) ) );
 
-			array_walk(
-				$custom_taxonomies,
-				function ( &$v ) use ( $custom_taxonomies_live, &$hierarchical_taxonomies_to_migrate, &$non_hierarchical_taxonomies_to_migrate ) {
-					if ( ! in_array( $v, $custom_taxonomies_live ) ) {
-						WP_CLI::error( sprintf( 'Custom taxonomy %s not found in live DB.', $v ) );
-					}
-
-					if ( is_taxonomy_hierarchical( $v ) ) {
-						$hierarchical_taxonomies_to_migrate[] = $v;
-					} else {
-						$non_hierarchical_taxonomies_to_migrate[] = $v;
-					}
+			foreach ( $custom_taxonomies as $custom_taxonomy ) {
+				if ( ! in_array( $custom_taxonomy, $custom_taxonomies_live ) ) {
+					WP_CLI::error( sprintf( 'Custom taxonomy %s not found in live DB.', $custom_taxonomy ) );
 				}
-			);
+
+				if ( is_taxonomy_hierarchical( $custom_taxonomy ) ) {
+					$hierarchical_taxonomies_to_migrate[] = $custom_taxonomy;
+				} else {
+					$non_hierarchical_taxonomies_to_migrate[] = $custom_taxonomy;
+				}
+			}
 		}
 
 		// Set constants.
