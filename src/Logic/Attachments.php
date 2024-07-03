@@ -5,6 +5,9 @@ namespace NewspackCustomContentMigrator\Logic;
 use \WP_CLI;
 use WP_Error;
 
+/**
+ * Attachments logic.
+ */
 class Attachments {
 	/**
 	 * Imports a media object from file and returns the ID.
@@ -25,11 +28,11 @@ class Attachments {
 	/**
 	 * Wrapper for import_external_file() with fewer args and enforced post_id.
 	 *
-	 * @param int $post_id              Post ID of the post the media should be attached to.
+	 * @param int    $post_id              Post ID of the post the media should be attached to.
 	 * @param string $path              Media file full URL or full local path, or URL to the media file.
 	 * @param string $alt_text          Optional. Image Attachment `alt` attribute.
-	 * @param array $attachment_args    Optional. Attachment creation argument to override used by the \media_handle_sideload(), used
-	 *                                      internally by the \wp_insert_attachment(), and even more internally by the \wp_insert_post().
+	 * @param array  $attachment_args    Optional. Attachment creation argument to override used by the \media_handle_sideload(), used
+	 *                                       internally by the \wp_insert_attachment(), and even more internally by the \wp_insert_post().
 	 * @param string $desired_filename  Optional. If the file you are importing has a different (or no) file extension than the one
 	 *                                      you want the resulting attachment to have, you can specify it here. Make sure that it
 	 *                                      actually matches the file mime type.
@@ -95,6 +98,12 @@ class Attachments {
 			// Without the extension, the upload will fail because WP will not allow that "file type".
 			$mimetype           = mime_content_type( $tmpfname );
 			$probably_extension = array_search( $mimetype, wp_get_mime_types() );
+
+			// Sometimes the extension is in the format `jpg|jpeg|jpe`. In that case, we need to get the first one.
+			if ( str_contains( $probably_extension, '|' ) ) {
+				$probably_extension = explode( '|', $probably_extension )[0];
+			}
+
 			if ( ! empty( $probably_extension ) ) {
 				$file_array['name'] .= '.' . $probably_extension;
 			}
@@ -149,13 +158,51 @@ class Attachments {
 		}
 
 		global $wpdb;
-		$like = '%' . $wpdb->esc_like( $filename );
-		$sql  = $wpdb->prepare(
-			"SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND meta_value LIKE '%s'",
-			$like
+
+		// Check if the file with same name exists in the DB.
+		$like = '%' . $wpdb->esc_like( sanitize_file_name( $filename ) );
+
+		/*
+		 * Check if files with numeric suffix like `filename-1.jpg` exist in DB.
+		 *
+		 * In case of imported duplicates, WP changes the file name to something like `filename-1.jpg`. In most cases, it wouldn't
+		 * be necessary to search for duplicates, because the original `filename.jpg` should already be found in the DB.
+		 * But some cases were encountered where the original was deleted and duplicates '-1', '-2' remained, and this script would
+		 * not catch those without this part.
+		 */
+		$filename_path_parts    = pathinfo( $filename );
+		$filename_before_suffix = $filename_path_parts['filename'];
+		$filename_after_suffix  = '.' . $filename_path_parts['extension'];
+		/**
+		 * Here's the regex explained:
+		 *  - .+ -- anything first
+		 *  - %s -- is for filename before suffix
+		 *  - -[0-9]+ -- dash and one or more numbers
+		 *  - \%s -- is for filename after suffix
+		 */
+		$regex_duplicates = esc_sql(
+			sprintf(
+				'.+%s-[0-9]+\\%s',
+				$filename_before_suffix,
+				$filename_after_suffix
+			)
 		);
 
-		foreach ( $wpdb->get_col( $sql ) as $attachment_id ) {
+		// phpcs:disable -- $regex_duplicates is properly sanitized.
+		$sql  = $wpdb->prepare(
+			"SELECT post_id
+			FROM {$wpdb->postmeta}
+			WHERE meta_key = '_wp_attached_file'
+			AND (
+			    meta_value LIKE '%s'
+				OR meta_value REGEXP '$regex_duplicates'
+			) ;",
+			$like
+		);
+		$attachment_ids = $wpdb->get_col( $sql );
+		// phpcs:enable
+
+		foreach ( $attachment_ids as $attachment_id ) {
 
 			$candidate_path = get_attached_file( $attachment_id );
 			// Check the file sizes first. It's a fast operation and will save us from having to do the md5 check.
@@ -164,8 +211,8 @@ class Attachments {
 			}
 
 			if ( md5_file( $candidate_path ) === md5_file( $filepath ) ) {
-				return $attachment_id;
-			}       
+				return intval( $attachment_id );
+			}
 		}
 
 		return null;
@@ -319,20 +366,49 @@ class Attachments {
 
 	/**
 	 * Find an attachment by its filename.
-	 * 
+	 *
 	 * @param string $filename The filename.
 	 * @return int The attachment ID.
 	 */
 	public function get_attachment_by_filename( $filename ) {
 		global $wpdb;
 
+		$filename = esc_sql( $filename );
+		// phpcs:disable -- $filename is properly sanitized.
 		$attachment_id = $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '_wp_attached_file' AND meta_value LIKE '%s'",
 				'%' . $filename,
 			),
 		);
+		// phpcs:enable
 
 		return $attachment_id;
 	}
+
+	/**
+	 * This helper wraps the `wp_get_attachment_image_src()` function to bypass Jetpack's Photon.
+	 *
+	 * We don't want the CDN urls in migration data because they are harder to replace later.
+	 *
+	 * @param int $attachment_id The attachment ID.
+	 * @param string $size The image size.
+	 * @param bool $icon Whether the image should be an icon.
+	 *
+	 * @return array|false
+	 */
+	public static function get_attachment_image_src( $attachment_id, $size = 'thumbnail', $icon = false ) {
+		static $filter_callback = null;
+		if ( null === $filter_callback ) {
+			$filter_callback = function ( $skip, $image_url, $args, $scheme ) {
+				return true;
+			};
+		}
+		add_filter( 'jetpack_photon_skip_for_url', $filter_callback, 10, 4 );
+		$src = wp_get_attachment_image_src( $attachment_id, $size, $icon );
+		remove_filter( 'jetpack_photon_skip_for_url', $filter_callback );
+
+		return $src;
+	}
+
 }

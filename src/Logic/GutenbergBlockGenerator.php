@@ -15,7 +15,7 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
-use \NewspackCustomContentMigrator\Utils\Logger;
+use NewspackCustomContentMigrator\Utils\Logger;
 use WP_Post;
 
 /**
@@ -71,7 +71,7 @@ class GutenbergBlockGenerator {
 			' ',
 			array_filter(
 				array_map(
-					function( $index, $attachment_id ) use ( &$tile_sizes, &$non_existing_attachment_indexes, $tile_sizes_list ) {
+					function ( $index, $attachment_id ) use ( &$tile_sizes, &$non_existing_attachment_indexes, $tile_sizes_list ) {
 						$attachment_url = wp_get_attachment_url( $attachment_id );
 
 						if ( ! $attachment_url ) {
@@ -260,12 +260,13 @@ class GutenbergBlockGenerator {
 			$size = 'full';
 		}
 
-		$caption_tag = ! empty( $attachment_post->post_excerpt ) ? '<figcaption class="wp-element-caption">' . $attachment_post->post_excerpt . '</figcaption>' : '';
-		$image_alt   = get_post_meta( $attachment_post->ID, '_wp_attachment_image_alt', true );
-		$image_url   = wp_get_attachment_image_src( $attachment_post->ID, $size )[0];
+		$caption_tag   = ! empty( $attachment_post->post_excerpt ) ? '<figcaption class="wp-element-caption">' . $attachment_post->post_excerpt . '</figcaption>' : '';
+		$image_alt     = get_post_meta( $attachment_post->ID, '_wp_attachment_image_alt', true );
+		$image_url     = Attachments::get_attachment_image_src( $attachment_post->ID, $size )[0];
+		$attachment_id = intval( $attachment_post->ID );
 
 		$attrs = [
-			'id'       => $attachment_post->ID,
+			'id'       => $attachment_id,
 			'sizeSlug' => $size,
 		];
 
@@ -287,7 +288,7 @@ class GutenbergBlockGenerator {
 
 		$figure_class = 'wp-block-image size-' . $size . ( $classname ? " $classname" : '' ) . ( $align ? " align$align" : '' );
 
-		$content = '<figure class="' . $figure_class . '">' . $a_opening_tag . '<img src="' . $image_url . '" alt="' . $image_alt . '" class="wp-image-' . $attachment_post->ID . '"/>' . $a_closing_tag . $caption_tag . '</figure>';
+		$content = '<figure class="' . $figure_class . '">' . $a_opening_tag . '<img src="' . $image_url . '" alt="' . $image_alt . '" class="wp-image-' . $attachment_id . '"/>' . $a_closing_tag . $caption_tag . '</figure>';
 
 		return [
 			'blockName'    => 'core/image',
@@ -306,8 +307,8 @@ class GutenbergBlockGenerator {
 	 * @return array
 	 */
 	public function get_video( WP_Post $attachment_post ): array {
-		$video_url   = wp_get_attachment_url( $attachment_post->ID);
-		$content = <<<VIDEO
+		$video_url = wp_get_attachment_url( $attachment_post->ID );
+		$content   = <<<VIDEO
 <figure class="wp-block-video"><video controls src="$video_url"></video></figure>
 VIDEO;
 		return [
@@ -335,10 +336,11 @@ VIDEO;
 		$title          = empty( $title ) ? $attachment_post->post_title : $title;
 
 		$attrs = [
-			'id'             => $attachment_post->ID,
-			'href'           => $attachment_url,
-			'displayPreview' => true,
-			'previewHeight'  => $height,
+			'id'                 => $attachment_post->ID,
+			'href'               => $attachment_url,
+			'displayPreview'     => true,
+			'previewHeight'      => $height,
+			'showDownloadButton' => $show_download_button,
 		];
 
 		$download_button = $show_download_button ? '<a href="' . $attachment_url . '" class="wp-block-file__button wp-element-button" download aria-describedby="wp-block-file--media-' . $uuid . '">Download</a>' : '';
@@ -388,24 +390,33 @@ VIDEO;
 	 * @param string $anchor Paragraph anchor.
 	 * @param string $text_color Paragraph text color (black, blue, green, red, yellow, gray, dark-gray, medium-gray, light-gray, white).
 	 * @param string $font_size Paragraph font size (small, normal, medium, large, huge).
+	 * @param array  $additional_css_classes Additional paragraph classes.
 	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
 	 */
-	public function get_paragraph( $paragraph_content, $anchor = '', $text_color = '', $font_size = '' ) {
-		$classes = [];
-		$attrs   = [];
+	public function get_paragraph( $paragraph_content, $anchor = '', $text_color = '', $font_size = '', array $additional_css_classes = [] ) {
+
+		// Paragraph can have both <p class=""> classes, and <!-- wp:paragraph {"className":""} --> className attributes (called "Additional CSS classes" in Gutenberg).
+		$paragraph_element_classes = [];
+		$attrs                     = [];
 		if ( ! empty( $text_color ) ) {
-			$classes[]         = 'has-' . $text_color . '-color has-text-color';
-			$attrs['fontSize'] = $text_color;
+			$paragraph_element_classes[] = 'has-' . $text_color . '-color has-text-color';
+			$attrs['fontSize']           = $text_color;
 		}
 		if ( ! empty( $font_size ) ) {
-			$classes[]         = 'has-' . $font_size . '-font-size';
-			$attrs['fontSize'] = $font_size;
+			$paragraph_element_classes[] = 'has-' . $font_size . '-font-size';
+			$attrs['fontSize']           = $font_size;
 		}
 
-		$class = ! empty( $classes ) ? ' class="' . implode( ' ', $classes ) . '"' : '';
+		// Add additional CSS classes to <p> and Block.
+		if ( ! empty( $additional_css_classes ) ) {
+			$paragraph_element_classes = array_merge( $paragraph_element_classes, $additional_css_classes );
+			$attrs['className']        = implode( ' ', $additional_css_classes );
+		}
+
+		$paragraph_element_class_string = ! empty( $paragraph_element_classes ) ? ' class="' . implode( ' ', $paragraph_element_classes ) . '"' : '';
 
 		$anchor_attribute = ! empty( $anchor ) ? ' id="' . $anchor . '"' : '';
-		$content          = '<p' . $anchor_attribute . $class . '>' . $paragraph_content . '</p>';
+		$content          = '<p' . $anchor_attribute . $paragraph_element_class_string . '>' . $paragraph_content . '</p>';
 
 		return [
 			'blockName'    => 'core/paragraph',
@@ -665,6 +676,7 @@ VIDEO;
 	 *
 	 * @param array $inner_blocks   Inner blocks.
 	 * @param array $custom_classes Custom classes to be added to the group block.
+	 * @param array $attrs          Attributes to be added to the group block.
 	 *
 	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
 	 */
@@ -732,17 +744,47 @@ VIDEO;
 	/**
 	 * Generate a Youtube block -- uses core/embed.
 	 *
-	 * @param string $src     YT src.
-	 * @param string $caption Optional.
+	 * @param string $src     YT src or YT ID.
 	 *
 	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
 	 */
-	public function get_youtube( $src, $caption = '' ) {
-		// Remove GET params from $src, otherwise the embed might not work.
-		$src_parsed  = wp_parse_url( $src );
-		$src_cleaned = $src_parsed['scheme'] . '://' . $src_parsed['host'] . $src_parsed['path'];
+	public function get_youtube( $src ) {
+		// Check if the $src is a URL.
+		if ( filter_var( $src, FILTER_VALIDATE_URL ) ) {
+			return $this->youtube_block_from_src( $src );
+		}
 
-		return $this->get_core_embed( $src_cleaned, $caption );
+		// If the $src is not a URL, it's probably a YT ID.
+		return $this->youtube_block_from_src( 'https://www.youtube.com/watch?v=' . $src );
+	}
+
+	/**
+	 * Generate a Youtube block from a YouTube URL.
+	 *
+	 * @param string $youtube_video_url YT youtube_video_url.
+	 *
+	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
+	 */
+	private function youtube_block_from_src( $youtube_video_url ) {
+		// Clean the URL from query params as they break the block.
+		$youtube_video_url = strtok( $youtube_video_url, '?' );
+
+		$inner_html = '<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
+		' . $youtube_video_url . '
+		</div></figure>';
+		return [
+			'blockName'    => 'core/embed',
+			'attrs'        => [
+				'url'              => $youtube_video_url,
+				'type'             => 'video',
+				'providerNameSlug' => 'youtube',
+				'responsive'       => true,
+				'className'        => 'wp-embed-aspect-16-9 wp-has-aspect-ratio',
+			],
+			'innerBlocks'  => [],
+			'innerHTML'    => $inner_html,
+			'innerContent' => [ $inner_html ],
+		];
 	}
 
 	/**
@@ -757,15 +799,23 @@ VIDEO;
 		return $this->get_core_embed( $src, $caption );
 	}
 
-	/**
-	 * Generate a Vimeo block -- uses core/embed.
-	 *
-	 * @param string $src     Vimeo src.
-	 * @param string $caption Optional.
-	 *
-	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
-	 */
-	public function get_twitter( $src, $caption = '' ) {
+	public function get_twitter( string $src, string $caption = '' ): array {
+		$class_names   = implode(
+			' ',
+			[
+				'wp-block-embed',
+				'is-type-rich',
+				'is-provider-twitter',
+				'wp-block-embed-twitter',
+				'nccm-twitter-embed',
+			]
+		);
+		$block_content = <<<HTML
+<figure class="$class_names"><div class="wp-block-embed__wrapper">
+$src
+</div></figure>
+HTML;
+
 		return [
 			'blockName'    => 'core/embed',
 			'attrs'        => [
@@ -773,12 +823,11 @@ VIDEO;
 				'type'             => 'rich',
 				'providerNameSlug' => 'twitter',
 				'responsive'       => true,
+				'className'        => $class_names,
 			],
 			'innerBlocks'  => [],
-			'innerHTML'    => ' <figure class="wp-block-embed is-type-rich is-provider-twitter wp-block-embed-twitter"><div class="wp-block-embed__wrapper"> ' . $src . ' </div></figure> ',
-			'innerContent' => [
-				0 => ' <figure class="wp-block-embed is-type-rich is-provider-twitter wp-block-embed-twitter"><div class="wp-block-embed__wrapper"> ' . $src . ' </div></figure> ',
-			],
+			'innerHTML'    => $block_content,
+			'innerContent' => [ $block_content ],
 		];
 	}
 
@@ -970,7 +1019,7 @@ VIDEO;
 	/**
 	 * Generate a Newspack Homepage Articles Block with specific posts.
 	 *
-	 * @param array $category_ids array of post IDs.
+	 * @param array $post_ids array of post IDs.
 	 * @param array $args args to pass to the block.
 	 *
 	 * @return array
@@ -980,6 +1029,9 @@ VIDEO;
 			return [];
 		}
 		$args['specificPosts'] = $post_ids;
+		if ( is_array( $args['className'] ?? false ) ) {
+			$args['className'] = implode( ' ', $args['className'] );
+		}
 
 		if ( empty( $args['postsToShow'] ) ) {
 			// Enforce a sane default if the value is not passed.
@@ -994,5 +1046,4 @@ VIDEO;
 			'innerContent' => [],
 		];
 	}
-
 }

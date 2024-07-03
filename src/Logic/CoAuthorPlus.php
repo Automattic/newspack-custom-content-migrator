@@ -1,10 +1,16 @@
 <?php
+/**
+ * Newspack Custom Content Migrator CAP logic class.
+ *
+ * @package NewspackCustomContentMigrator.
+ */
 
 namespace NewspackCustomContentMigrator\Logic;
 
-use \CoAuthors_Plus;
-use \CoAuthors_Guest_Authors;
-use \WP_CLI;
+use CoAuthors_Plus;
+use CoAuthors_Guest_Authors;
+use WP_CLI;
+use WP_Error;
 use WP_Post;
 
 /**
@@ -83,7 +89,7 @@ class CoAuthorPlus {
 	}
 
 	/**
-	 * Creates Guest Authors from their full names.
+	 * Gets existing GA by display_name, or creates a new Guest Author if it doesn't exist.
 	 *
 	 * @param array $args {
 	 *     The $args param for the \CoAuthors_Guest_Authors::create method.
@@ -115,7 +121,7 @@ class CoAuthorPlus {
 			 * If user_login is provided, let's sanitize it both with urldecode() and sanitize_title(), to minimize errors when
 			 * CAP saves and then retrieves it.
 			 *
-			 * see \CoAuthors_Guest_Authors::get_guest_author_by for why this is needed:
+			 * See \CoAuthors_Guest_Authors::get_guest_author_by for why this is needed:
 			 *   - because they do:
 			 *       $guest_author['user_login'] = urldecode( $guest_author['user_login'] );
 			 *
@@ -131,16 +137,69 @@ class CoAuthorPlus {
 			 *      - while description will contain "6-20386e-15"
 			 */
 			$args['user_login'] = sanitize_title( urldecode( $args['user_login'] ) );
+
+			// If user_login is the same as existing WP_User.username, CAP will allow it to be created, but it will not allow it to be edited:
+			// "There is a WordPress user with the same username as this guest author, please go back and link them in order to update."
+			// So let's prevent that by giving it a unique user_login which is not used by WP_User. That way, we can keep the GA and WP_User separate.
+			// or link them afterwards, both options will work fine.
+			// Check if $args['user_login'] is used by WP_User.username.
+			$args['user_login'] = $this->get_unique_user_login( $args['user_login'] );
 		}
 
-		$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'user_login', $args['user_login'] );
-		if ( false === $guest_author ) {
+		$guest_author = $this->get_guest_author_by_display_name( $args['display_name'] );
+		if ( is_null( $guest_author ) ) {
 			$coauthor_id = $this->coauthors_guest_authors->create( $args );
 		} else {
 			$coauthor_id = $guest_author->ID;
 		}
 
 		return $coauthor_id;
+	}
+
+	/**
+	 * Gets a unique user_login for a new Guest Author, making sure that WP_User.username is not using it.
+	 * If $user_login is already used, will return a unique one with appended "_{random_string}" to it.
+	 *
+	 * @param string $user_login User login.
+	 *
+	 * @return string Unique user_login.
+	 */
+	public function get_unique_user_login( string $user_login ): string {
+		global $wpdb;
+
+		// Return this $user_login if it doesn't exist as WP_User.user_login or CAP postmeta 'cap-user_login'.
+		// phpcs:disable -- Allow querying users table.
+		$wpuser_login_exists  = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM $wpdb->users WHERE user_login = %s", $user_login ) );
+		// phpcs:enable
+		$capuser_login_exists = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = 'cap-user_login' AND meta_value = %s", $user_login ) );
+		if ( ! $wpuser_login_exists && ! $capuser_login_exists ) {
+			return $user_login;
+		}
+
+		// Create a unique user_login one and return that if it's not taken.
+		$unique_user_login = sprintf( '%s_%s', $user_login, $this->generate_random_string() );
+		// phpcs:disable -- Allow querying users table.
+		$unique_wpuser_login_exists  = $wpdb->get_var( $wpdb->prepare( "SELECT ID FROM $wpdb->users WHERE user_login = %s", $unique_user_login ) );
+		// phpcs:ensable
+		$unique_capuser_login_exists = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = 'cap-user_login' AND meta_value = %s", $unique_user_login ) );
+		if ( ! $unique_wpuser_login_exists && ! $unique_capuser_login_exists ) {
+			return $unique_user_login;
+		}
+
+		// Recursively call until returns a unique user_login.
+		return $this->get_unique_user_login( $user_login );
+	}
+
+	/**
+	 * Generates a random string.
+	 *
+	 * @param int $length Length of the random string to generate.
+	 *
+	 * @return string Random string.
+	 */
+	public function generate_random_string( int $length = 5 ): string {
+		$characters = 'abcdefghijklmnopqrstuvwxyz0123456789';
+		return substr( str_shuffle( str_repeat( $characters, $length ) ), 0, $length );
 	}
 
 	/**
@@ -244,12 +303,24 @@ class CoAuthorPlus {
 	 * @param bool  $append_to_existing_users Append to existing Guest Authors.
 	 */
 	public function assign_guest_authors_to_post( array $guest_author_ids, $post_id, bool $append_to_existing_users = false ) {
+		$coauthors_user_nicenames = [];
 		$coauthors = [];
 		foreach ( $guest_author_ids as $guest_author_id ) {
-			$guest_author = $this->coauthors_guest_authors->get_guest_author_by( 'id', $guest_author_id );
-			$coauthors[]  = $guest_author->user_nicename;
+			$guest_author               = $this->coauthors_guest_authors->get_guest_author_by( 'id', $guest_author_id );
+
+			$coauthors_user_nicenames[] = $guest_author->user_nicename;
+			$coauthors[]                = $guest_author->user_nicename;
 		}
-		$this->coauthors_plus->add_coauthors( $post_id, $coauthors, $append_to_existing_users );
+		$this->coauthors_plus->add_coauthors( $post_id, $coauthors_user_nicenames, $append_to_existing_users );
+
+		// Validate if the authors were assigned correctly.
+		$valid = $this->validate_authors_for_post( $post_id, $coauthors );
+		if ( is_wp_error( $valid ) ) {
+			$ga_ids = array_map( function( $author ) {
+				return $author->ID;
+			}, $coauthors );
+			throw new \RuntimeException( sprintf( 'Failed to assign guest author IDs %s to post ID %d. Error: %s', implode( ',', $ga_ids ), $post_id, $valid->get_error_message() ) );
+		}
 	}
 
 	/**
@@ -260,6 +331,7 @@ class CoAuthorPlus {
 	 * @param bool  $append_to_existing_users Append to existing Guest Authors.
 	 *
 	 * @throws \UnexpectedValueException If $authors contains an unsupported class.
+	 * @throws \RuntimeException         If authors were not assigned correctly.
 	 */
 	public function assign_authors_to_post( array $authors, $post_id, bool $append_to_existing_users = false ) {
 		$coauthors_nicenames = [];
@@ -273,6 +345,125 @@ class CoAuthorPlus {
 			}
 		}
 		$this->coauthors_plus->add_coauthors( $post_id, $coauthors_nicenames, $append_to_existing_users );
+		
+		// Validate if the authors were assigned correctly.
+		$valid = $this->validate_authors_for_post( $post_id, $authors );
+		if ( is_wp_error( $valid ) ) {
+			$author_ids = array_map( function( $author ) {
+				return $author->ID;
+			}, $authors );
+			throw new \RuntimeException( sprintf( 'Failed to assign author IDs %s to post ID %d. Error: %s', implode( ',', $author_ids ), $post_id, $valid->get_error_message() ) );
+		}
+	}
+
+	/**
+	 * Validates if expected authors (or author names) are assigned to post.
+	 *
+	 * @param int $post_id                     Post ID.
+	 * @param array $author_names              Array of author objects (either WP_User or CAP GA objects) or just author display_names.
+	 * @param boolean $strict_order_or_authors Optional. Should the order of authors be observed strictly? Default is yes/true.
+	 * @return boolean|WP_Error                True if authors/author names are as expected, WP_Error if not.
+	 */
+	public function validate_authors_for_post( int $post_id, array $authors_expected, bool $strict_order_or_authors = true ): bool|WP_Error {
+
+		// Get actual authors. If no GAs are assigned to post, get WP Post author.
+		$authors_actual = $this->get_all_authors_for_post( $post_id );
+		if ( ! $authors_actual ) {
+			$wp_post = get_post( $post_id );
+			$authors_actual = [ get_userdata( $wp_post->post_author ) ];
+		}
+
+		// If number of authors is different, return error.
+		if ( count( $authors_expected ) !== count( $authors_actual ) ) {
+			return new WP_Error( sprintf( 'Post ID %d does not have the expected number of authors which is %d.', $post_id, count( $authors_expected ) ) );
+		}
+
+		// Validate expected authors.
+		foreach ( $authors_expected as $key_author_expected => $author_expected ) {
+			
+			// If $strict_order_of_authors is true, also check exact author position.
+			if ( true === $strict_order_or_authors ) {
+				
+				$author_actual = $authors_actual[ $key_author_expected ];
+				if ( is_object( $author_expected ) ) {
+					$does_name_match = $author_expected->display_name == $author_actual->display_name;
+					if ( ! $does_name_match ) {
+						return new WP_Error( sprintf( "Post ID %d author index %d actual author display_name '%s' is different from expected display name '%s'.", $post_id, $key_author_expected, $author_actual->display_name, $author_expected->display_name ) );
+					}
+					$does_ID_match = $author_expected->ID == $author_actual->ID;
+					if ( ! $does_ID_match ) {
+						return new WP_Error( sprintf( "Post ID %d author index %d actual author ID %d is different than expected object ID %d.", $post_id, $key_author_expected, $author_actual->ID, $author_expected->ID ) );
+					}
+				} elseif ( is_string( $author_expected ) ) {
+					$does_name_match = $author_expected == $author_actual->display_name;
+					if ( ! $does_name_match ) {
+						return new WP_Error( sprintf( "Post ID %d author index %d actual author display_name '%s' is different from expected display name '%s'.", $post_id, $key_author_expected, $author_actual->display_name, $author_expected ) );
+					}
+				} else {
+					return new WP_Error( sprintf( 'Expected author index %d is neither WP_User, nor GAP GA object, nor display_name string.', $key_author_expected ) );
+				}
+
+			} else {
+
+				// If not observing strict order of authors, just check if the author names are present in the list of authors.
+				if ( is_object( $author_expected ) ) {
+					$does_name_match = in_array( $author_expected->display_name, array_column($authors_actual, 'display_name' ) );
+					if ( ! $does_name_match ) {
+						return new WP_Error( sprintf( "Expected author index '%s' and display_name '%s' is not an author of post ID %d.", $key_author_expected, $author_expected->display_name, $post_id ) );
+					}
+					$does_ID_match = in_array( $author_expected->ID, array_column($authors_actual, 'ID' ) );
+					if ( ! $does_ID_match ) {
+						return new WP_Error( sprintf( "Expected author index '%s' and ID '%d' is not an author of post ID %d.", $key_author_expected, $author_expected->ID, $post_id ) );
+					}
+				} elseif ( is_string( $author_expected ) ) {
+					$does_name_match = in_array( $author_expected, array_column($authors_actual, 'display_name' ) );
+					if ( ! $does_name_match ) {
+						return new WP_Error( sprintf( "Expected author index '%s' and display_name '%s' is not an author of post ID %d.", $key_author_expected, $author_expected, $post_id ) );
+					}
+				} else {
+					return new WP_Error( sprintf( 'Expected author index %d is neither a WP_User, nor a GAP GA object, nor a string.', $key_author_expected ) );
+				}
+
+			}
+		}
+
+		return true;
+	}
+	/**
+	 * Unassigns all Guest Authors from the Post.
+	 * After running this, the Post will have no Guest Authors, and authorship will be determined by wp_posts.post_author WP_User.
+	 *
+	 * @param integer $post_id Post ID.
+	 * @return void
+	 * @throws \UnexpectedValueException If GA not removed successfully.
+	 */
+	public function unassign_all_guest_authors_from_post( int $post_id ): void {
+		global $wpdb;
+
+		// Get all object relationships for this post where taxonomy is 'author'.
+		$results = $wpdb->get_results( $wpdb->prepare(
+			"select wtr.object_id, wtr.term_taxonomy_id
+			from $wpdb->term_relationships wtr
+			join $wpdb->term_taxonomy wtt on wtt.term_taxonomy_id = wtr.term_taxonomy_id and wtt.taxonomy = 'author'
+			where wtr.object_id = %s;",
+			$post_id
+		), ARRAY_A );
+
+		// Remove these term relationships.
+		foreach ( $results as $result ) {
+			$deleted = $wpdb->delete(
+				$wpdb->term_relationships,
+				[
+					'object_id'        => $result['object_id'],
+					'term_taxonomy_id' => $result['term_taxonomy_id'],
+				]
+			);
+			if ( false === $deleted ) {
+				throw new \RuntimeException( sprintf( 'ERROR -- failed to delete term relationship for post/object ID %d and term taxonomy ID %d.', $result['object_id'], $result['term_taxonomy_id'] ) );
+			}
+		}
+
+		wp_cache_flush();
 	}
 
 	/**
@@ -305,12 +496,13 @@ class CoAuthorPlus {
 	/**
 	 * Returns the Guest Author object which has a linked WP_User with given $user_login_of_linked_wpuser account.
 	 *
-	 * @param int $user_login_of_linked_account user_login of linked WP_User account.
+	 * @param int  $user_login_of_linked_wpuser user_login of linked WP_User account.
+	 * @param bool $force Force a new query.
 	 *
 	 * @return ?object Guest Author object or null.
 	 */
-	public function get_guest_author_by_linked_wpusers_user_login( $user_login_of_linked_wpuser ) {
-		$ga = $this->coauthors_guest_authors->get_guest_author_by( 'linked_account', $user_login_of_linked_wpuser );
+	public function get_guest_author_by_linked_wpusers_user_login( $user_login_of_linked_wpuser, $force = false ) {
+		$ga = $this->coauthors_guest_authors->get_guest_author_by( 'linked_account', $user_login_of_linked_wpuser, $force );
 
 		if ( false === $ga ) {
 			return null;
@@ -379,7 +571,7 @@ class CoAuthorPlus {
 	 *
 	 * @param string $display_name Guest Author ID.
 	 *
-	 * @return false|object|array False, a single Guest Author object, or an array of multiple Guest Author objects.
+	 * @return null|object|array Null, a single Guest Author object, or an array of multiple Guest Author objects.
 	 */
 	public function get_guest_author_by_display_name( $display_name ) {
 
@@ -404,6 +596,10 @@ class CoAuthorPlus {
 
 		if ( 1 === count( $post_ids_results ) ) {
 			return $gas[0];
+		}
+
+		if ( 0 === count( $gas ) ) {
+			return null;
 		}
 
 		return $gas;
@@ -473,7 +669,6 @@ class CoAuthorPlus {
 		}
 
 		return $guest_author;
-
 	}
 
 	/**
@@ -481,7 +676,7 @@ class CoAuthorPlus {
 	 *
 	 * @param int $post_id Post ID.
 	 *
-	 * @return mixed|void
+	 * @return array Array of Guest Author objects.
 	 */
 	public function get_guest_authors_for_post( $post_id ) {
 		$guest_authors = [];
@@ -689,13 +884,13 @@ class CoAuthorPlus {
 
 		$records = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT 
+				"SELECT
 	                object_id
-				FROM $wpdb->term_relationships 
-				WHERE term_taxonomy_id = ( 
-				    SELECT 
-				           term_taxonomy_id 
-				    FROM $wpdb->term_relationships 
+				FROM $wpdb->term_relationships
+				WHERE term_taxonomy_id = (
+				    SELECT
+				           term_taxonomy_id
+				    FROM $wpdb->term_relationships
 				    WHERE object_id = %d )",
 				$ga_id
 			)
@@ -760,7 +955,7 @@ class CoAuthorPlus {
 	 * Convenience function to help validate a WP User object. If passed a User ID,
 	 * it will convert it to a WP User object.
 	 *
-	 * @param \WP_User|int $wp_user
+	 * @param \WP_User|int $wp_user WP User object or ID.
 	 *
 	 * @return false|mixed|\WP_User
 	 */

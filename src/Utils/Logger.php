@@ -7,7 +7,7 @@
 
 namespace NewspackCustomContentMigrator\Utils;
 
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * Class for handling commands' logging
@@ -20,6 +20,7 @@ class Logger {
 	const LINE    = 'line';
 	const SUCCESS = 'success';
 	const ERROR   = 'error';
+	const INFO    = 'info';
 
 	/**
 	 * Determine the writeable directory used for storing logs created by migration commands.
@@ -34,7 +35,6 @@ class Logger {
 		}
 
 		return $log_dir . DIRECTORY_SEPARATOR . $filename . '.log';
-
 	}
 
 	/**
@@ -43,10 +43,11 @@ class Logger {
 	 * @param string         $file File name or path.
 	 * @param string         $message Log message.
 	 * @param string|boolean $level Whether to output the message to the CLI. Default to `line` CLI level.
+	 * @param bool           $exit_on_error Whether to exit on error.
 	 */
 	public function log( $file, $message, $level = 'line', bool $exit_on_error = false ) {
 		$log_line_prefix = '';
-		if ( in_array($level, [ self::SUCCESS, self::WARNING, self::ERROR ], true ) ) {
+		if ( in_array( $level, [ self::SUCCESS, self::WARNING, self::ERROR ], true ) ) {
 			// Prepend the level to the message for easier grepping in the log file.
 			$log_line_prefix .= strtoupper( $level ) . ': ';
 		}
@@ -57,20 +58,28 @@ class Logger {
 			switch ( $level ) {
 				case ( self::SUCCESS ):
 					WP_CLI::success( $message );
-				    break;
+					break;
 				case ( self::WARNING ):
 					WP_CLI::warning( $message );
-		            break;
+					break;
 				case ( self::ERROR ):
 					WP_CLI::error( $message, $exit_on_error );
-		            break;
+					break;
+				case ( self::INFO ):
+					$label = 'Info';
+					if ( class_exists( 'cli\Colors' ) ) {
+						$color = '%B';
+						$label = \cli\Colors::colorize( "$color$label:%n", true );
+					} else {
+						$label = "$label:";
+					}
+					WP_CLI::line( "$label $message" );
+					break;
 				case ( self::LINE ):
 				default:
 					WP_CLI::line( $message );
-				    break;
+					break;
 			}
 		}
-
 	}
-
 }

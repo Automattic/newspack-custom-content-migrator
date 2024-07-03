@@ -1,6 +1,6 @@
 # Newspack Custom Content Migrator
 
-This plugin is a set of WP CLI commands, and scripts used during Newspack sites Live Launches and/or Content Updates.
+This plugin is a set of WP CLI commands and scripts used during Newspack sites Live Launches and/or Content Updates.
 
 This Plugin consists of various Migrators (which perform reusable or publisher-specific content migration), and the "Content Diff" logic.
 
@@ -50,3 +50,9 @@ After creating a new Command, run `composer dump-autoload` to update the autoloa
 The Knife uses the [content_diff_update.sh script](https://github.com/Automattic/newspack-custom-content-migrator/blob/master/cli_content_diff_update/content_diff_update.sh) to run the whole CD update automatically.
 
 Alternatively, the [Content Diff CLI command class](https://github.com/Automattic/newspack-custom-content-migrator/blob/master/src/Migrator/General/ContentDiffMigrator.php) exposes commands which we can run manually to first detect the newest content (`newspack-content-migrator content-diff-search-new-content-on-live`) and then import it (`newspack-content-migrator content-diff-migrate-live-content`).
+
+## Creating a release
+* Update the version number in newspack-custom-content-migrator.php
+* Git that with the version number
+* Run `composer run-script release`
+* Create a new release (with the browser) on Github and upload the .zip file from the release you just built.
