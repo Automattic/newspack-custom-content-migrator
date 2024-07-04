@@ -9,7 +9,6 @@ namespace NewspackCustomContentMigrator\Logic;
 
 use CoAuthors_Plus;
 use CoAuthors_Guest_Authors;
-use WP_CLI;
 use WP_Error;
 use WP_Post;
 
@@ -115,7 +114,7 @@ class CoAuthorPlus {
 
 		// If not provided, automatically set `user_login` from display_name.
 		if ( ! isset( $args['user_login'] ) ) {
-			$args['user_login'] = sanitize_user( $args['display_name'] );
+			$args['user_login'] = sanitize_title( $args['display_name'] );
 		} else {
 			/**
 			 * If user_login is provided, let's sanitize it both with urldecode() and sanitize_title(), to minimize errors when
@@ -309,7 +308,7 @@ class CoAuthorPlus {
 			$guest_author               = $this->coauthors_guest_authors->get_guest_author_by( 'id', $guest_author_id );
 
 			$coauthors_user_nicenames[] = $guest_author->user_nicename;
-			$coauthors[]                = $guest_author->user_nicename;
+			$coauthors[]                = $guest_author;
 		}
 		$this->coauthors_plus->add_coauthors( $post_id, $coauthors_user_nicenames, $append_to_existing_users );
 
@@ -319,7 +318,13 @@ class CoAuthorPlus {
 			$ga_ids = array_map( function( $author ) {
 				return $author->ID;
 			}, $coauthors );
-			throw new \RuntimeException( sprintf( 'Failed to assign guest author IDs %s to post ID %d. Error: %s', implode( ',', $ga_ids ), $post_id, $valid->get_error_message() ) );
+			throw new \RuntimeException(
+				sprintf(
+					'Failed to assign guest author IDs %s to post ID %d. Error: %s',
+					implode( ',', $ga_ids ),
+					$post_id,
+					$valid->get_error_message() )
+			);
 		}
 	}
 
@@ -386,9 +391,11 @@ class CoAuthorPlus {
 				
 				$author_actual = $authors_actual[ $key_author_expected ];
 				if ( is_object( $author_expected ) ) {
-					$does_name_match = $author_expected->display_name == $author_actual->display_name;
+					$author_actual_display_name = $author_actual->display_name ?? '';
+					$author_expected_display_name = $author_expected->display_name ?? '';
+					$does_name_match = $author_actual_display_name === $author_expected_display_name;
 					if ( ! $does_name_match ) {
-						return new WP_Error( sprintf( "Post ID %d author index %d actual author display_name '%s' is different from expected display name '%s'.", $post_id, $key_author_expected, $author_actual->display_name, $author_expected->display_name ) );
+						return new WP_Error( sprintf( "Post ID %d author index %d actual author display_name '%s' is different from expected display name '%s'.", $post_id, $key_author_expected, $author_actual_display_name, $author_expected_display_name ) );
 					}
 					$does_ID_match = $author_expected->ID == $author_actual->ID;
 					if ( ! $does_ID_match ) {
@@ -532,7 +539,7 @@ class CoAuthorPlus {
 	 * @return false|object Guest Author object.
 	 */
 	public function get_guest_author_by_user_login( $ga_user_login ) {
-		return $this->coauthors_guest_authors->get_guest_author_by( 'user_login', sanitize_user( $ga_user_login ) );
+		return $this->coauthors_guest_authors->get_guest_author_by( 'user_login', $ga_user_login );
 	}
 
 	/**
