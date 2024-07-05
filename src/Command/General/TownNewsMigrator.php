@@ -148,6 +148,7 @@ class TownNewsMigrator implements InterfaceCommand {
 		$imported_original_ids = $this->get_imported_original_ids();
 
 		$export_dir_iterator = new DirectoryIterator( $export_dir_path );
+		$num = 0;
 		foreach ( $export_dir_iterator as $year_dir ) {
 			$year = intval( $year_dir->getFilename() );
 
@@ -171,7 +172,7 @@ class TownNewsMigrator implements InterfaceCommand {
 
 				foreach ( $month_dir_iterator as $file ) {
 					if ( 'xml' === $file->getExtension() ) {
-						$this->logger->log( self::LOG_FILE, sprintf( 'Importing post from %s', $file->getFilename() ), Logger::INFO );
+						$this->logger->log( self::LOG_FILE, sprintf( '(%d) Importing post from %s', ++$num, $file->getFilename() ), Logger::INFO );
 						$post_id = $this->import_post_from_xml( $file->getPathname(), $month_dir->getPathname(), $imported_original_ids, $default_author_id );
 
 						if ( $post_id ) {
@@ -655,7 +656,6 @@ class TownNewsMigrator implements InterfaceCommand {
 		$last_name                  = '';
 		$email                      = '';
 		$avatar                     = '';
-		$using_email_as_displayname = false;
 
 		if ( ! empty( $author_meta ) ) {
 			$author_meta = current( $author_meta );
@@ -670,9 +670,14 @@ class TownNewsMigrator implements InterfaceCommand {
 		$display_name = str_starts_with( strtolower( $display_name ), 'by ' ) ? substr( $display_name, 3 ) : $display_name;
 		// if no display_name use email address.
 		if ( empty( $display_name ) ) {
-			$display_name               = $email;
-			$using_email_as_displayname = true;
+			$display_name = $first_name . ' ' . $last_name;
+			if ( empty( trim( $display_name ) ) ) {
+				// Let's do our very best to get a display name that is NOT the email.
+				$display_name = sanitize_user( strstr( $email, '@', true ) );
+			}
 		}
+		// Byline can sometimes contain HTML tags, so strip those here.
+		$display_name = trim( strip_tags( $display_name ) );
 
 		// Setting default author/co-author in case the article doesn't have any.
 		if ( empty( $display_name ) ) {
@@ -702,13 +707,13 @@ class TownNewsMigrator implements InterfaceCommand {
 			);
 		} else {
 			// Set as a co-author.
-			$guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login( $email );
+			$guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login( sanitize_user( $display_name ) );
 
 			if ( ! $guest_author ) {
 				// The user isn't found using an email, however, it still may already exist, just under a different display name.
 				// Under the hood, `$this->coauthorsplus_logic->create_guest_author()` uses this function to check that it
 				// isn't creating a duplicate Guest Author.
-				$guest_author = $this->coauthorsplus_logic->coauthors_plus->get_coauthor_by( 'user_login', sanitize_title( $display_name ) );
+				$guest_author = $this->coauthorsplus_logic->coauthors_plus->get_coauthor_by( 'user_login', sanitize_user( $display_name ) );
 			}
 
 			if ( $guest_author ) {
@@ -740,12 +745,15 @@ class TownNewsMigrator implements InterfaceCommand {
 					$author_id = $this->get_staff_author_id();
 				}
 			}
+			$check_author = $this->coauthorsplus_logic->get_guest_author_by_id( $author_id );
+			if ( empty( $check_author->user_nicename ) ) {
+				// There is validation in the Co-Authors Plus logic that gets very mad if nicename is not present. Let's just use the default author in that case.
+				$this->logger->log( self::LOG_FILE, sprintf( 'Have to use default author for Post ID %d, GA %d does not have a nicename', $post_id, $author_id ), Logger::WARNING );
+				$author_id = $this->get_staff_author_id();
+			}
 
 			$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $author_id ], $post_id );
 
-			if ( $using_email_as_displayname ) {
-				update_post_meta( $author_id, 'author_email_as_display_name', true );
-			}
 		}
 	}
 
