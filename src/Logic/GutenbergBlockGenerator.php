@@ -1044,6 +1044,7 @@ HTML;
 		if ( empty( $post_ids ) ) {
 			return [];
 		}
+		$args['specificMode']  = true;
 		$args['specificPosts'] = $post_ids;
 		if ( is_array( $args['className'] ?? false ) ) {
 			$args['className'] = implode( ' ', $args['className'] );
