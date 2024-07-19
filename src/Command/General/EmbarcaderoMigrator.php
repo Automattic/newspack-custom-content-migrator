@@ -4634,6 +4634,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			/* Pleasanton Weekly */
 			'cap-jeb-bing'      => 'cap-jbingembarcaderopublishing-com',
 			'cap-staff-reports' => 'cap-staff',
+			'cap-gennady-sheyner' => 'cap-gsheyner',
+			'cap-sue-dremann'     => 'cap-sdremannembarcaderopublishing-com',
 		];
 
 		foreach ( ( new FileImportFactory() )->get_file( $import_file )->getIterator() as $row ) {
@@ -4711,6 +4713,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$console->bright_magenta( 'Byline is not empty, but there are no authors assigned to the post' )->underlined_bright_magenta( $row['byline'] )->output();
 				// Check if there is an exact match for the byline as is.
 				$cap_byline = 'cap-' . sanitize_title( $row['byline'] );
+				$cap_byline       = $manual_slug_map_override[ $cap_byline ] ?? $cap_byline;
 				ConsoleColor::white( 'Direct Search Slug:' )->bright_white( $cap_byline )->output();
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 				$author_term = $wpdb->get_row(
@@ -5043,7 +5046,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 					$byline_author = array_shift( $byline_authors );
 
-					$author_post_author_slug_comparison           = $this->compare_values(
+					/*$author_post_author_slug_comparison           = $this->compare_values(
 						$byline_author['cap-name'],
 						! str_starts_with( $post_author->user_nicename, 'cap-' ) ? "cap-$post_author->user_nicename" : $post_author->user_nicename ?? 'Not Found'
 					);
@@ -5055,7 +5058,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					$post_author_wp_user_description_comparison   = $this->compare_values(
 						$this->cap_data_fixer->get_author_term_description( $post_author ),
 						$this->cap_data_fixer->get_author_term_description( $user )
-					);
+					);*/
 					$wp_user_author_term_slug_nicename_comparison = $this->compare_values(
 						! str_starts_with( $user->user_nicename, 'cap-' ) ? "cap-$user->user_nicename" : $user->user_nicename,
 						$author_term->slug
@@ -5064,6 +5067,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						$this->cap_data_fixer->get_author_term_description( $user ),
 						$author_term->description
 					);
+					$author_author_term_slug_nicename_comparison = $this->compare_values( $byline_author['cap-name'], $author_term->slug );
 
 					ConsoleTable::output_comparison(
 						[
@@ -5078,7 +5082,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 							'slug/nicename' => $byline_author['cap-name'],
 							'description'   => $row['byline'],
 						],
-						[
+						/*[
 							'_'             => '-',
 							'name/email'    => '-',
 							'slug/nicename' => $author_post_author_slug_comparison->as_string,
@@ -5095,12 +5099,18 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 							'name/email'    => $post_author_wp_user_name_email_comparison->as_string,
 							'slug/nicename' => $post_author_wp_user_slug_nicename_comparison->as_string,
 							'description'   => $post_author_wp_user_description_comparison->as_string,
+						],*/
+						[
+							'_'             => '-',
+							'name/email'    => '-',
+							'slug/nicename' => $author_author_term_slug_nicename_comparison->as_string,
+							'description'   => '-',
 						],
 						[
-							'_'             => 'WP User',
-							'name/email'    => $user->user_email,
-							'slug/nicename' => ! str_starts_with( $user->user_nicename, 'cap-' ) ? "cap-$user->user_nicename" : $user->user_nicename,
-							'description'   => $this->cap_data_fixer->get_author_term_description( $user ),
+							'_'             => 'Author Term',
+							'name/email'    => $author_term->name,
+							'slug/nicename' => $author_term->slug,
+							'description'   => $author_term->description,
 						],
 						[
 							'_'             => '-',
@@ -5109,19 +5119,20 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 							'description'   => $wp_user_author_term_description_comparison->as_string,
 						],
 						[
-							'_'             => 'Author Term',
-							'name/email'    => $author_term->name,
-							'slug/nicename' => $author_term->slug,
-							'description'   => $author_term->description,
+							'_'             => 'WP User',
+							'name/email'    => $user->user_email,
+							'slug/nicename' => ! str_starts_with( $user->user_nicename, 'cap-' ) ? "cap-$user->user_nicename" : $user->user_nicename,
+							'description'   => $this->cap_data_fixer->get_author_term_description( $user ),
 						],
 					);
 
 					// Happy Path.
 					$all_good = [
-						$author_post_author_slug_comparison->as_bool,
+						/*$author_post_author_slug_comparison->as_bool,
 						$post_author_wp_user_name_email_comparison->as_bool,
 						$post_author_wp_user_slug_nicename_comparison->as_bool,
-						$post_author_wp_user_description_comparison->as_bool,
+						$post_author_wp_user_description_comparison->as_bool,*/
+						$author_author_term_slug_nicename_comparison->as_bool,
 						$wp_user_author_term_slug_nicename_comparison->as_bool,
 						$wp_user_author_term_description_comparison->as_bool,
 					];
@@ -5132,10 +5143,11 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 							// Sometimes the author term description is not correct, but if everything else is all good,
 							// we should consider the record properly set and validated.
 							$all_good = [
-								$author_post_author_slug_comparison->as_bool,
+								/*$author_post_author_slug_comparison->as_bool,
 								$post_author_wp_user_name_email_comparison->as_bool,
 								$post_author_wp_user_slug_nicename_comparison->as_bool,
-								$post_author_wp_user_description_comparison->as_bool,
+								$post_author_wp_user_description_comparison->as_bool,*/
+								$author_author_term_slug_nicename_comparison->as_bool,
 								$wp_user_author_term_slug_nicename_comparison->as_bool,
 							];
 
@@ -5149,10 +5161,9 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						}
 					}
 
-					$author_author_term_slug_nicename_comparison = $this->compare_values( $byline_author['cap-name'], $author_term->slug );
 					if (
-						! $author_post_author_slug_comparison->as_bool &&
-						$post_author_wp_user_slug_nicename_comparison->as_bool &&
+						/*! $author_post_author_slug_comparison->as_bool &&
+						$post_author_wp_user_slug_nicename_comparison->as_bool &&*/
 						$wp_user_author_term_slug_nicename_comparison->as_bool
 					) {
 
@@ -5268,6 +5279,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 							if ( 's' === $prompt ) {
 								update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
 								continue 2;
+							} elseif ( 'c' === $prompt ) {
+								if ( $all_good ) {
+									$authors_validated[] = true;
+								}
 							} elseif ( 'h' === $prompt ) {
 								die();
 							}
@@ -5278,15 +5293,15 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					} elseif (
 						$count_of_author_terms > 1 &&
 						$author_author_term_slug_nicename_comparison->as_bool &&
-						! $author_post_author_slug_comparison->as_bool &&
+						//						! $author_post_author_slug_comparison->as_bool &&
 						$wp_user_author_term_slug_nicename_comparison->as_bool
 					) {
 						ConsoleColor::yellow_with_blue_background( 'Multiple authors assigned to post, and CSV Byline Author match' )->output();
 						$authors_validated[] = true;
 					} elseif (
 						1 === $count_of_author_terms &&
-						$author_author_term_slug_nicename_comparison->as_bool &&
-						! $author_post_author_slug_comparison->as_bool
+						$author_author_term_slug_nicename_comparison->as_bool /*&&
+						! $author_post_author_slug_comparison->as_bool*/
 					) {
 
 						$prompt = $this->ask( 'Would you like to use Author Term-WP User to update Post Author? [(y)es/(n)o]' );
@@ -5314,7 +5329,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 							update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
 							continue 2;
 						}
-					} elseif ( $author_post_author_slug_comparison->as_bool && $author_found ) {
+					} elseif ( /*$author_post_author_slug_comparison->as_bool &&*/ $author_found ) {
 						$prompt = $this->ask( 'Would you like to use Post Author to update Author Term so that they match? [(y)es/(n)o]' );
 
 						if ( 'y' === $prompt ) {
