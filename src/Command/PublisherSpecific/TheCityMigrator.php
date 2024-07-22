@@ -147,6 +147,15 @@ class TheCityMigrator implements InterfaceCommand {
 				'synopsis'  => [],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator thecity-postlaunch-undo-rt-camp-bylines',
+			[ $this, 'cmd_undo_rt_camp_bylines' ],
+			[
+				'shortdesc' => ' TheCity had a customized version of CAP which displayed custom bylines. This command will transfer those bylines to post content, so that use of the custom bylines can be deprecated.',
+				'synopsis'  => [],
+			]
+		);
 	}
 
 	public function cmd_postlaunch_update_subtitles( array $pos_args, array $assoc_args ): void {
@@ -706,6 +715,138 @@ HTML;
 			);
 
 			update_post_meta( $post->ID, '_the_city_features_post_meta', $byline );
+		}
+	}
+
+	/**
+	 * This function/command was created to undo a byline migration that was performed previously to support a custom
+	 * plugin that was being created for The City.
+	 *
+	 * @return void
+	 */
+	public function cmd_undo_rt_camp_bylines() {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$posts_with_custom_bylines = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT ID, post_name, post_content 
+				FROM $wpdb->posts 
+				WHERE post_type = %s 
+				  AND post_status = %s 
+				  AND ID IN ( 
+				  	SELECT post_id 
+				  	FROM $wpdb->postmeta 
+				  	WHERE meta_key = %s 
+				  	  AND meta_value <> ''
+				  ) 
+				  AND post_content NOT LIKE %s 
+				ORDER BY ID ASC",
+				'post',
+				'publish',
+				'_the_city_features_post_meta',
+				'%' . $wpdb->esc_like( 'p-additional-reporters' ) . '%'
+			)
+		);
+
+		foreach ( $posts_with_custom_bylines as $post ) {
+			echo "\n\n\n";
+			ConsoleColor::white( 'Processing Post ID:' )
+						->bright_white( $post->ID )
+						->white( 'Post Name:' )
+						->bright_white( $post->post_name )
+						->white( 'Link:' )
+						->bright_white( get_site_url() . '/?p=' . $post->ID )
+						->output();
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$additional_contributor_ga_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT DISTINCT meta_value FROM $wpdb->postmeta WHERE meta_key = %s AND post_id = %d",
+					'newspack_chorus_additional_contributor_ga_id',
+					$post->ID
+				)
+			);
+
+			if ( empty( $additional_contributor_ga_ids ) ) {
+				ConsoleColor::yellow( 'Skipping' )->white( 'No additional contributors' )->output();
+				continue;
+			}
+
+			$additional_contributor_ga_names = [];
+			foreach ( $additional_contributor_ga_ids as $additional_contributor_id ) {
+				$additional_contributor_ga = $this->cap_logic->get_guest_author_by_id( $additional_contributor_id );
+				if ( $additional_contributor_ga ) {
+					$additional_contributor_ga_names[] = trim( $additional_contributor_ga->display_name );
+				}
+			}
+			// - compose the byline
+			$additional_contributors_byline = 'Additional reporting by ';
+			$separators                     = [];
+			if ( empty( $additional_contributor_ga_names ) ) {
+				$ga_ids = implode( ', ', $additional_contributor_ga_ids );
+				ConsoleColor::yellow( "Skipping, because the following GA IDs do not exist: $ga_ids" )->output();
+				continue;
+			} elseif ( 1 === count( $additional_contributor_ga_names ) ) {
+				$additional_contributors_byline .= $additional_contributor_ga_names[0];
+			} else {
+				// - separators are ", ", except the last one which is " and ".
+				$separators                             = array_fill( 0, count( $additional_contributor_ga_names ) - 1, ', ' );
+				$separators[ count( $separators ) - 1 ] = ' and ';
+				foreach ( $additional_contributor_ga_names as $key_ac_ga_name => $additional_contributor_ga_name ) {
+					$additional_contributors_byline .= $additional_contributor_ga_name . ( isset( $separators[ $key_ac_ga_name ] ) ? $separators[ $key_ac_ga_name ] : '' );
+				}
+			}
+
+			// Prepend byline as paragraph to post_content.
+			$paragraph_block      = $this->gutenberg_blocks->get_paragraph( $additional_contributors_byline, '', '', '', [ 'p-additional-reporters' ] );
+			$paragraph_block_html = serialize_blocks( [ $paragraph_block ] );
+			$post_content_updated = $paragraph_block_html . "\n\n" . $post->post_content;
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->update( $wpdb->posts, [ 'post_content' => $post_content_updated ], [ 'ID' => $post->ID ] );
+			WP_CLI::success( 'Updated ' . $post->ID );
+
+			$additional_contributor_placeholder_ga_ids = implode( ',', array_fill( 0, count( $additional_contributor_ga_ids ), '%s' ) );
+			// phpcs:disable -- query has been properly placeholdered and prepared.
+			$term_taxonomy_ids                          = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT tt.term_taxonomy_id 
+       				  	FROM $wpdb->term_taxonomy tt 
+       				  	    INNER JOIN $wpdb->term_relationships tr ON tt.term_taxonomy_id = tr.term_taxonomy_id 
+       				  	WHERE tt.taxonomy = %s 
+       				  	  AND tr.object_id IN ( $additional_contributor_placeholder_ga_ids )",
+					'author',
+					...$additional_contributor_ga_ids
+				)
+			);
+			$term_taxonomy_id_placeholders              = implode( ',', array_fill( 0, count( $term_taxonomy_ids ), '%s' ) );
+			$currently_assigned_additional_contributors = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT term_taxonomy_id FROM $wpdb->term_relationships WHERE object_id = %d AND term_taxonomy_id IN ( $term_taxonomy_id_placeholders )",
+					$post->ID,
+					...$term_taxonomy_ids
+				)
+			);
+
+			if ( ! empty( $currently_assigned_additional_contributors ) ) {
+				ConsoleColor::magenta( 'Removing additional contributors as guest authors from post' )->output();
+				$term_taxonomy_id_placeholders = implode( ',', array_fill( 0, count( $currently_assigned_additional_contributors ), '%s' ) );
+				$result                        = $wpdb->query(
+					$wpdb->prepare(
+						"DELETE FROM $wpdb->term_relationships 
+       				WHERE object_id = %d 
+       				  AND term_taxonomy_id IN ( $term_taxonomy_id_placeholders )",
+						$post->ID,
+						...$currently_assigned_additional_contributors
+					)
+				);
+				// phpcs:enable
+
+				if ( count( $currently_assigned_additional_contributors ) === $result ) {
+					ConsoleColor::green( 'Additional Contributors removed successfully' )->output();
+				} else {
+					ConsoleColor::red( 'Review results!' )->output();
+				}
+			}
 		}
 	}
 
