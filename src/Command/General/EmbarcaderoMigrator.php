@@ -349,7 +349,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$this->taxonomy_logic            = new Taxonomy();
 		$this->coauthorsplus_logic       = new CoAuthorPlus();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
-		$this->cap_data_fixer = new CoAuthorPlusDataFixer();
+		$this->cap_data_fixer            = new CoAuthorPlusDataFixer();
 
 		$this->site_timezone = new DateTimeZone( 'America/Los_Angeles' );
 	}
@@ -5442,6 +5442,9 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$qa_file = fopen( $qa_filename, 'w' );
 		$header  = [
 			'story_id'                 => null,
+			'original_byline'          => null,
+			'original_posted_by'       => null,
+			'original_author_email'    => null,
 			'post_id'                  => null,
 			'post_author_id'           => null,
 			'post_author_nicename'     => null,
@@ -5472,6 +5475,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						$row->post_id
 					)
 				);
+
+				$qa_row['original_byline']       = get_post_meta( $post_id, 'newspack_cap_qa_original_byline', true );
+				$qa_row['original_posted_by']    = get_post_meta( $post_id, 'newspack_cap_qa_original_posted_by', true );
+				$qa_row['original_author_email'] = get_post_meta( $post_id, 'newspack_cap_qa_original_author_email', true );
 			} else {
 				$story_id = $row['story_id'];
 
@@ -5483,6 +5490,19 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						$row['story_id']
 					)
 				);
+
+				$qa_row['original_byline'] = $row['byline'];
+				if ( ! empty( $row['byline'] ) ) {
+					add_post_meta( $post_id, 'newspack_cap_qa_original_byline', $row['byline'], true );
+				}
+				$qa_row['original_posted_by'] = $row['posted_by'];
+				if ( ! empty( $row['posted_by'] ) ) {
+					add_post_meta( $post_id, 'newspack_cap_qa_original_posted_by', $row['posted_by'], true );
+				}
+				$qa_row['original_author_email'] = $row['author_email'];
+				if ( ! empty( $row['author_email'] ) ) {
+					add_post_meta( $post_id, 'newspack_cap_qa_original_author_email', $row['author_email'], true );
+				}
 			}
 
 			$qa_row['story_id'] = $story_id;
