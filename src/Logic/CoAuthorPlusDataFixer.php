@@ -264,6 +264,40 @@ class CoAuthorPlusDataFixer {
 	}
 
 	/**
+	 * This function will extract the ID from the description of an author term.
+	 *
+	 * @param string $description Description of the author term.
+	 *
+	 * @return int|null
+	 */
+	public function extract_id_from_author_term_description( string $description ): int|null {
+		preg_match_all( '/\s(\d+)(?=\s)/', $description, $matches );
+
+		if ( empty( $matches ) ) {
+			return null;
+		}
+
+		return intval( array_pop( $matches[1] ) );
+	}
+
+	/**
+	 * This function will extract the email from the description of an author term.
+	 *
+	 * @param string $description Author term description.
+	 *
+	 * @return string|null
+	 */
+	public function extract_email_from_author_term_description( string $description ): string|null {
+		preg_match( '/(\s){1}([\w\-\.]+@([\w\-]+\.)+[\w\-]{2,4})$/', $description, $matches );
+
+		if ( empty( $matches ) ) {
+			return null;
+		}
+
+		return $matches[2];
+	}
+
+	/**
 	 * This function will obtain the CAP description format for an author term and
 	 * update the wp_term_taxonomy.description column with it.
 	 *

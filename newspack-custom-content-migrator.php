@@ -22,7 +22,6 @@ require_once ABSPATH . 'wp-settings.php';
 
 PluginSetup::configure_error_reporting();
 PluginSetup::register_ticker();
-PluginSetup::add_hooks();
 PluginSetup::register_migrators(
 	array(
 		// General.
@@ -96,6 +95,7 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\BigBendSentinelMigrator::class,
 		Command\PublisherSpecific\LAFocusMigrator::class,
 		Command\PublisherSpecific\TheFifthEstateMigrator::class,
+		Command\PublisherSpecific\ArkansasTimesMigrator::class,
+		Command\PublisherSpecific\ZocaloMigrator::class,
 	)
 );
-

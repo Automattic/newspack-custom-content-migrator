@@ -30,7 +30,7 @@ class Users {
 	 *
 	 * @return void|null
 	 */
-	public function output_users_table( array $users, string $title = "User's Table" ) {
+	public static function output_users_table( array $users, string $title = "User's Table" ) {
 		$users = array_map(
 			function ( $user ) {
 				if ( $user instanceof WP_User ) {
