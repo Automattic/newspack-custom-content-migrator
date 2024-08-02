@@ -79,6 +79,12 @@
     "release": [
       "composer install --no-dev --optimize-autoloader",
       "composer archive --format=zip --dir=release --file=newspack-custom-content-migrator"
+    ],
+    "update-with-nmt-symlinked": [
+      "rm -rf  vendor/automattic/newspack-migration-tools",
+      "composer install",
+      "rm -rf vendor/automattic/newspack-migration-tools",
+      "ln -s ../../dev/newspack-migration-tools vendor/automattic/newspack-migration-tools"
     ]
   }
 }
