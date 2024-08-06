@@ -84,5 +84,6 @@ PluginSetup::register_migrators(
 		Command\PublisherSpecific\CarsonNowMigrator::class,
 		Command\PublisherSpecific\ArkansasTimesMigrator::class,
 		Command\PublisherSpecific\ZocaloMigrator::class,
+		Command\PublisherSpecific\StandardMigrationTestMigrator::class,
 	)
 );
