@@ -18,6 +18,10 @@
     {
       "url": "https://github.com/Automattic/newspack-content-converter.git",
       "type": "git"
+    },
+    {
+        "type": "git",
+        "url": "https://github.com/Automattic/newspack-migration-tools.git"
     }
   ],
   "require": {
@@ -29,7 +33,8 @@
     "halaxa/json-machine": "^1.1",
     "mustache/mustache": "^2.14",
     "simplehtmldom/simplehtmldom": "2.0-RC2",
-    "automattic/newspack-scraper-migrator": "dev-trunk"
+    "automattic/newspack-scraper-migrator": "dev-trunk",
+    "automattic/newspack-migration-tools": "dev-trunk"
   },
   "require-dev": {
     "automattic/vipwpcs": "^3.0",
@@ -74,6 +79,12 @@
     "release": [
       "composer install --no-dev --optimize-autoloader",
       "composer archive --format=zip --dir=release --file=newspack-custom-content-migrator"
+    ],
+    "update-with-nmt-symlinked": [
+      "rm -rf  vendor/automattic/newspack-migration-tools",
+      "composer install",
+      "rm -rf vendor/automattic/newspack-migration-tools",
+      "ln -s ../../dev/newspack-migration-tools vendor/automattic/newspack-migration-tools"
     ]
   }
 }

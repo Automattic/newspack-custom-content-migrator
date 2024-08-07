@@ -22,6 +22,7 @@ require_once ABSPATH . 'wp-settings.php';
 
 PluginSetup::configure_error_reporting();
 PluginSetup::register_ticker();
+PluginSetup::add_hooks();
 PluginSetup::register_migrators(
 	array(
 		// General.
