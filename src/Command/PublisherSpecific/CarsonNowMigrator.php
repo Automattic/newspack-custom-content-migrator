@@ -39,6 +39,13 @@ class CarsonNowMigrator implements InterfaceCommand {
 		'optional'    => true,
 	];
 
+	private array $min_post_id_arg = [
+		'type'        => 'assoc',
+		'name'        => 'min-post-id',
+		'description' => 'Minimum post ID to include in run (inclusive).',
+		'optional'    => true,
+	];
+
 	/**
 	 * @var DateTimeZone
 	 */
@@ -113,6 +120,7 @@ class CarsonNowMigrator implements InterfaceCommand {
 				'synopsis'      => [
 					$this->refresh_existing_arg,
 					$this->num_posts_arg,
+					$this->min_post_id_arg,
 					$this->max_post_id_arg,
 				],
 				'before_invoke' => [ $this, 'preflight' ],
@@ -127,6 +135,7 @@ class CarsonNowMigrator implements InterfaceCommand {
 				'synopsis'      => [
 					$this->refresh_existing_arg,
 					$this->num_posts_arg,
+					$this->min_post_id_arg,
 					$this->max_post_id_arg,
 				],
 				'before_invoke' => [ $this, 'preflight' ],
@@ -238,7 +247,8 @@ class CarsonNowMigrator implements InterfaceCommand {
 	 * @return string byline
 	 */
 	private function get_drupal_byline( int $nid ): string {
-		$sql = "SELECT field_byline_value FROM drupal_content_field_byline cfb
+		$prefix = $this->get_prefix();
+		$sql    = "SELECT field_byline_value FROM {$prefix}content_field_byline cfb
 					JOIN drupal_node n ON cfb.nid = n.nid AND cfb.vid = n.vid
 					WHERE cfb.nid = $nid";
 		global $wpdb;
@@ -264,9 +274,8 @@ class CarsonNowMigrator implements InterfaceCommand {
 			if ( empty( $nid ) ) {
 				continue;
 			}
-			$images      = $this->get_drupal_images_from_nid( $nid );
 			$attachments = [];
-			foreach ( $images as $img ) {
+			foreach ( $this->get_drupal_images_from_nid( $nid ) as $img ) {
 				$attrs                 = $img['attributes'];
 				$attrs['post_excerpt'] = $attrs['description'] ?? '';
 				$attrs['post_title']   = empty( $attrs['title'] ) ? $attrs['post_excerpt'] : $attrs['title'];
@@ -366,9 +375,9 @@ class CarsonNowMigrator implements InterfaceCommand {
 	}
 
 	public function get_image_data_from_fid( $fid, $fallback_to_imagecache = true ): array {
-
+		$prefix = $this->get_prefix();
 		global $wpdb;
-		$result = $wpdb->get_results( "SELECT * FROM drupal_files WHERE fid = $fid", ARRAY_A );
+		$result = $wpdb->get_results( "SELECT * FROM ${prefix}files WHERE fid = $fid", ARRAY_A );
 		if ( empty( $result ) ) {
 			return [];
 		}
@@ -390,10 +399,20 @@ class CarsonNowMigrator implements InterfaceCommand {
 		];
 	}
 
+	private function get_prefix(): string {
+		if ( defined( 'NCCM_DRUPAL_PREFIX' ) || ! empty( trim( NCCM_DRUPAL_PREFIX ) ) ) {
+			return NCCM_DRUPAL_PREFIX;
+		}
+		global $table_prefix;
+
+		return $table_prefix;
+	}
+
 	public function get_drupal_images_from_nid( int $nid ) {
-		$sql = "SELECT field_images_fid, field_images_data 
-					FROM drupal_content_field_images cfi 
-					JOIN drupal_node n ON cfi.nid = n.nid AND cfi.vid = n.vid 
+		$prefix = $this->get_prefix();
+		$sql    = "SELECT field_images_fid, field_images_data 
+					FROM {$prefix}content_field_images cfi 
+					JOIN {$prefix}node n ON cfi.nid = n.nid AND cfi.vid = n.vid 
 					WHERE cfi.nid = $nid
 					  AND cfi.field_images_list = 1
 					  AND cfi.field_images_fid IS NOT NULL
@@ -548,6 +567,7 @@ class CarsonNowMigrator implements InterfaceCommand {
 		if ( ! empty( $assoc_args['post-id'] ) ) {
 			$all_ids = [ $assoc_args['post-id'] ];
 		} else {
+			$min_post_id = $assoc_args['min-post-id'] ?? 0;
 			$max_post_id = $assoc_args['max-post-id'] ?? PHP_INT_MAX;
 			$num_posts   = $assoc_args['num-posts'] ?? PHP_INT_MAX;
 			global $wpdb;
@@ -559,10 +579,10 @@ class CarsonNowMigrator implements InterfaceCommand {
 			FROM {$wpdb->posts}
 			WHERE post_type IN ( $post_type_placeholders )
 			AND post_status IN ( $post_status_placeholders )
-			AND ID <= %d
+			AND ID BETWEEN %d AND %d
 			ORDER BY ID DESC
 			LIMIT %d",
-					[ ...$post_types, ...$post_statuses, $max_post_id, $num_posts ]
+					[ ...$post_types, ...$post_statuses, $min_post_id, $max_post_id, $num_posts ]
 				)
 			);
 		}
