@@ -316,12 +316,34 @@ class CarsonNowMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Filter the options for the FG Drupal to WP plugin to use environment variables for the database connection.
+	 * Put these variables in your .env file locally (or comment out locally).
+	 *
+	 * @param array $options The options to filter.
+	 *
+	 * @return array The filtered options.
+	 * @throws ExitException
+	 */
+	public function filter_fgd2wp_options( $options ) {
+		$options['hostname'] = getenv( 'DB_HOST' );
+		$options['database'] = getenv( 'DB_NAME' );
+		$options['username'] = getenv( 'DB_USER' );
+		$options['password'] = getenv( 'DB_PASSWORD' );
+		if ( empty( $options['hostname'] ) || empty( $options['database'] ) || empty( $options['username'] ) || empty( $options['password'] ) ) {
+			WP_CLI::error( 'Could not get database connection details from environment variables.' );
+		}
+
+		return $options;
+	}
+
+	/**
 	 * Run the import.
 	 *
 	 * We simply wrap the import command from FG Drupal and add our hooks before running the import.
 	 * Note that we can't batch this at all, so timeouts might be a thing.
 	 */
 	public function cmd_wrap_drupal_import( array $pos_args, array $assoc_args ): void {
+		add_filter( 'option_fgd2wp_options', [ $this, 'filter_fgd2wp_options' ] );
 		add_action( 'fgd2wp_pre_dispatch', [ $this, 'add_fg_hooks' ] );
 		// Note that the 'launch' arg is important – without it the hooks above will not be registered.
 		WP_CLI::runcommand( 'import-drupal import', [ 'launch' => false ] );
