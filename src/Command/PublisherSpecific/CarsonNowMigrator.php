@@ -342,6 +342,8 @@ class CarsonNowMigrator implements InterfaceCommand {
 			WP_CLI::error( 'Could not get database connection details from environment variables.' );
 		}
 
+		$options['prefix'] = $this->get_prefix();
+
 		return $options;
 	}
 
@@ -399,13 +401,18 @@ class CarsonNowMigrator implements InterfaceCommand {
 		];
 	}
 
+
+	/**
+	 * Get the prefix for the drupal tables.
+	 *
+	 * @return string
+	 */
 	private function get_prefix(): string {
 		if ( defined( 'NCCM_DRUPAL_PREFIX' ) || ! empty( trim( NCCM_DRUPAL_PREFIX ) ) ) {
 			return NCCM_DRUPAL_PREFIX;
 		}
-		global $table_prefix;
 
-		return $table_prefix;
+		return 'drupal_';
 	}
 
 	public function get_drupal_images_from_nid( int $nid ) {
