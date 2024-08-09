@@ -1234,6 +1234,30 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'name'        => 'story-csv-path',
 						'description' => 'Path to the CSV file containing the stories.',
 						'optional'    => false,
+						'repeating' => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-match-original-byline-to-post',
+			[ $this, 'cmd_match_original_byline_to_post' ],
+			[
+				'shortdesc' => 'With a QA file in hand, we can tell which posts have the incorrect authors assigned. This command will attempt to remedy the discrepancies.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'qa-file-path',
+						'description' => 'Path to the QA file.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'staff-nicename',
+						'description' => 'Nicename of staff account.',
+						'optional'    => false,
 						'repeating'   => false,
 					],
 				],
@@ -5543,6 +5567,179 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		}
 
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- just need a quick and easy way to do this.
+		fclose( $qa_file );
+	}
+
+	public function cmd_match_original_byline_to_post( array $args, array $assoc_args ) {
+		$file_path      = $assoc_args['qa-file-path'];
+		$staff_nicename = $assoc_args['staff-nicename'];
+
+		$process_csv_file = 'author_post_rel_fix_process.csv';
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- just need a quick and easy way to do this.
+		$qa_file = fopen( $process_csv_file, 'w' );
+		$header  = [
+			'story_id'                 => null,
+			'original_byline'          => null,
+			'original_posted_by'       => null,
+			'original_author_email'    => null,
+			'post_id'                  => null,
+			'post_author_id'           => null,
+			'post_author_nicename'     => null,
+			'post_author_email'        => null,
+			'post_author_display_name' => null,
+			'author_nicename'          => null,
+			'author_email'             => null,
+			'author_display_name'      => null,
+			'sanitized_byline'         => null,
+			'byline_nicename'          => null,
+			'newly_created'            => 'No',
+			'skipped'                  => null,
+			'new_author_nicename'      => null,
+			'new_author_display_name'  => null,
+			'successfully_assigned'    => null,
+		];
+		fputcsv(
+			$qa_file,
+			array_keys( $header )
+		);
+
+		global $wpdb;
+
+		$max_user_id = $wpdb->get_var( "SELECT MAX(ID) FROM $wpdb->users" );
+
+		foreach ( ( new FileImportFactory() )->get_file( $file_path )->getIterator() as $row ) {
+			unset( $row['discrepancy'] );
+			unset( $row['col'] );
+
+			ConsoleColor::white( 'Story ID:' )->underlined_bright_white( $row['story_id'] )
+						->white( 'Post ID:' )->underlined_bright_white( $row['post_id'] )
+						->white( 'Original Byline:' )->underlined_bright_white( $row['original_byline'] )
+						->white( 'Author Nicename:' )->underlined_bright_white( $row['author_nicename'] )
+						->white( 'Author Display Name:' )->underlined_bright_white( $row['author_display_name'] )
+						->output();
+
+			$qa_row = array_merge( $header, $row );
+
+			if ( empty( $row['post_id'] ) ) {
+				$qa_row['skipped'] = 'Yes';
+				fputcsv( $qa_file, $qa_row );
+				continue;
+			}
+
+			if ( empty( $row['original_byline'] ) ) {
+				if ( strtolower( $row['author_display_name'] ) === 'staff' ) {
+					$qa_row['skipped'] = 'Yes';
+					fputcsv( $qa_file, $qa_row );
+					continue;
+				} else {
+					$qa_row['skipped']         = 'No';
+					$qa_row['byline_nicename'] = $staff_nicename;
+					$this->coauthorsplus_logic->coauthors_plus->add_coauthors( $row['post_id'], [ $staff_nicename ], false );
+
+					$cap_coauthors           = get_coauthors( $row['post_id'] );
+					$co_author_nicenames     = implode( ', ', array_map( fn( $a ) => $a->user_nicename, $cap_coauthors ) );
+					$co_author_display_names = implode( ', ', array_map( fn( $a ) => $a->display_name, $cap_coauthors ) );
+
+					$qa_row['new_author_nicename']     = $co_author_nicenames;
+					$qa_row['new_author_display_name'] = $co_author_display_names;
+					$qa_row['successfully_assigned']   = $co_author_nicenames === $staff_nicename ? 'Yes' : 'No';
+					fputcsv( $qa_file, $qa_row );
+					continue;
+				}
+			}
+
+			$qa_row['skipped'] = 'No';
+
+			$sanitized_byline           = sanitize_title( $row['original_byline'] );
+			$qa_row['sanitized_byline'] = $sanitized_byline;
+
+			$acceptable_author_exists = $wpdb->get_row(
+				$wpdb->prepare(
+					"SELECT * FROM $wpdb->users WHERE ID <= %d AND user_nicename = %s AND display_name = %s",
+					$max_user_id,
+					$sanitized_byline,
+					$row['original_byline']
+				)
+			);
+
+			if ( $acceptable_author_exists ) {
+				$this->coauthorsplus_logic->coauthors_plus->add_coauthors( $row['post_id'], [ $sanitized_byline ], false );
+				$qa_row['byline_nicename'] = $sanitized_byline;
+				$cap_coauthors             = get_coauthors( $row['post_id'] );
+				$co_author_nicenames       = implode( ', ', array_map( fn( $a ) => $a->user_nicename, $cap_coauthors ) );
+				$co_author_display_names   = implode( ', ', array_map( fn( $a ) => $a->display_name, $cap_coauthors ) );
+
+				$qa_row['new_author_nicename']     = $co_author_nicenames;
+				$qa_row['new_author_display_name'] = $co_author_display_names;
+				$qa_row['successfully_assigned']   = $co_author_display_names === $qa_row['original_byline'] ? 'Yes' : 'No';
+				fputcsv( $qa_file, $qa_row );
+				continue;
+			}
+
+			$recently_created_author = $wpdb->get_row(
+				$wpdb->prepare(
+					"SELECT * FROM $wpdb->users WHERE ID > %d AND user_login LIKE %s AND display_name = %s",
+					$max_user_id,
+					$wpdb->esc_like( $sanitized_byline ) . '%',
+					$row['original_byline']
+				)
+			);
+
+			if ( $recently_created_author ) {
+				$this->coauthorsplus_logic->coauthors_plus->add_coauthors( $row['post_id'], [ $recently_created_author->user_nicename ], false );
+				$qa_row['byline_nicename'] = $recently_created_author->user_nicename;
+				$qa_row['newly_created']   = 'Yes';
+				$cap_coauthors             = get_coauthors( $row['post_id'] );
+				$co_author_nicenames       = implode( ', ', array_map( fn( $a ) => $a->user_nicename, $cap_coauthors ) );
+				$co_author_display_names   = implode( ', ', array_map( fn( $a ) => $a->display_name, $cap_coauthors ) );
+
+				$qa_row['new_author_nicename']     = $co_author_nicenames;
+				$qa_row['new_author_display_name'] = $co_author_display_names;
+				$qa_row['successfully_assigned']   = $co_author_display_names === $qa_row['original_byline'] ? 'Yes' : 'No';
+				fputcsv( $qa_file, $qa_row );
+				continue;
+			}
+
+			if ( username_exists( $sanitized_byline ) || strlen( $sanitized_byline ) > 55 ) {
+				$sanitized_byline = substr( $sanitized_byline, 0, 55 );
+				$sanitized_byline .= '-' . substr( md5( wp_rand() ), 0, 5 );
+			}
+
+			$user_id = wp_create_user( $sanitized_byline, wp_generate_password() );
+
+			if ( is_wp_error( $user_id ) ) {
+				ConsoleColor::red( 'Error creating user' )->underlined_bright_red( $user_id->get_error_message() )->output();
+				$qa_row['successfully_assigned'] = 'Error';
+				$qa_row['skipped']               = 'Yes';
+				fputcsv( $qa_file, $qa_row );
+				continue;
+			}
+
+			$wpdb->update(
+				$wpdb->users,
+				[
+					'display_name' => $row['original_byline'],
+				],
+				[
+					'ID' => $user_id,
+				]
+			);
+
+			$user = get_user_by( 'id', $user_id );
+
+			$this->coauthorsplus_logic->coauthors_plus->add_coauthors( $row['post_id'], [ $user->user_nicename ], false );
+
+			$qa_row['byline_nicename']         = $user->user_nicename;
+			$qa_row['newly_created']           = 'Yes';
+			$cap_coauthors                     = get_coauthors( $row['post_id'] );
+			$co_author_nicenames               = implode( ', ', array_map( fn( $a ) => $a->user_nicename, $cap_coauthors ) );
+			$co_author_display_names           = implode( ', ', array_map( fn( $a ) => $a->display_name, $cap_coauthors ) );
+			$qa_row['new_author_nicename']     = $co_author_nicenames;
+			$qa_row['new_author_display_name'] = $co_author_display_names;
+			$qa_row['successfully_assigned']   = $co_author_display_names === $qa_row['original_byline'] ? 'Yes' : 'No';
+			fputcsv( $qa_file, $qa_row );
+		}
 		fclose( $qa_file );
 	}
 
