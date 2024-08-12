@@ -307,16 +307,21 @@ class CarsonNowMigrator implements InterfaceCommand {
 			$post->post_content                  = serialize_blocks( [ $gallery_block, ...$blocks ] );
 
 			$this->logger->log( 'images.log', sprintf( 'Added gallery to post ID %d: %s', $post->ID, get_permalink( $post ) ) );
-		} else { // Some galleries only have one image – in that case we don't need a gallery block.
+		} else {
 			$attachment_post = get_post( current( $images ) );
 			if ( ! $attachment_post instanceof WP_Post ) {
 				return $post;
 			}
-			$img_block_class                 = 'cn-gallery-1-img';
-			$blocks                          = GutenbergBlockManipulator::remove_blocks_with_class( $img_block_class, $post->post_content );
-			$img_block                       = $this->gutenberg_block_generator->get_image( $attachment_post, 'full', false );
-			$img_block['attrs']['className'] = $img_block_class;
-			$post->post_content              = serialize_blocks( [ $img_block, ...$blocks ] );
+			$img_block_class = 'cn-gallery-1-img';
+			$blocks          = GutenbergBlockManipulator::remove_blocks_with_class( $img_block_class, $post->post_content );
+			$img_block       = $this->gutenberg_block_generator->get_image( $attachment_post, 'full', false );
+			if ( empty( $img_block['attrs']['className'] ) ) {
+				$img_block['attrs']['className'] = $img_block_class;
+			} else {
+				$img_block['attrs']['className'] .= ',' . $img_block_class;
+			}
+
+			$post->post_content = serialize_blocks( [ $img_block, ...$blocks ] );
 
 			$this->logger->log( 'images.log', sprintf( 'Added image block to post ID %d: %s', $post->ID, get_permalink( $post ) ) );
 		}
@@ -408,7 +413,7 @@ class CarsonNowMigrator implements InterfaceCommand {
 	 * @return string
 	 */
 	private function get_prefix(): string {
-		if ( defined( 'NCCM_DRUPAL_PREFIX' ) || ! empty( trim( NCCM_DRUPAL_PREFIX ) ) ) {
+		if ( defined( 'NCCM_DRUPAL_PREFIX' ) && ! empty( trim( NCCM_DRUPAL_PREFIX ) ) ) {
 			return NCCM_DRUPAL_PREFIX;
 		}
 
