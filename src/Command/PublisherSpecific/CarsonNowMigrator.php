@@ -390,11 +390,11 @@ class CarsonNowMigrator implements InterfaceCommand {
 		}
 		$field_image = $result[0];
 
-		$img_url = 'https://www.carsonnow.org/' . $field_image['filepath'];
+		$img_url = trailingslashit( NCCM_SOURCE_WEBSITE_URL ) . $field_image['filepath'];
 
 		if ( $fallback_to_imagecache ) {
 			$request = wp_remote_head( $img_url, [ 'redirection' => 5 ] );
-			if ( empty( $request['response']['code'] ) || $request['response']['code'] === 404 ) {
+			if ( is_wp_error( $request ) || 404 === $request['response']['code'] ?? 404 ) {
 				$img_url = str_replace( '/files/', '/files/imagecache/galleryformatter_slide/', $img_url );
 			}
 		}
