@@ -227,10 +227,12 @@ class CarsonNowMigrator implements InterfaceCommand {
 			// Add the byline block to the beginning of the content.
 			array_unshift( $post_blocks, \Newspack_Content_Byline::get_post_meta_bound_byline_block() );
 
-			wp_update_post( [
-				'ID'           => $post->ID,
-				'post_content' => serialize_blocks( $post_blocks ),
-			] );
+			wp_update_post(
+				[
+					'ID'           => $post->ID,
+					'post_content' => serialize_blocks( $post_blocks ),
+				] 
+			);
 			// Set the byline as metadata too.
 			update_post_meta( $post->ID, \Newspack_Content_Byline::BYLINE_META_KEY, $drupal_byline );
 
@@ -467,7 +469,6 @@ class CarsonNowMigrator implements InterfaceCommand {
 		}
 
 		return $post_type;
-
 	}
 
 	public function fg_filter_get_node_types( $node_types ) {
@@ -515,16 +516,18 @@ class CarsonNowMigrator implements InterfaceCommand {
 				return self::SKIP_IMPORTING_POST;
 			}
 
-			$block         = serialize_block( [
-				'blockName'    => 'newspack-listings/event-dates',
-				'attrs'        => [
-					'startDate' => $date->format( self::WP_DATE_FORMAT ),
-					'showTime'  => true,
-				],
-				'innerBlocks'  => [],
-				'innerHTML'    => '',
-				'innerContent' => [],
-			] );
+			$block         = serialize_block(
+				[
+					'blockName'    => 'newspack-listings/event-dates',
+					'attrs'        => [
+						'startDate' => $date->format( self::WP_DATE_FORMAT ),
+						'showTime'  => true,
+					],
+					'innerBlocks'  => [],
+					'innerHTML'    => '',
+					'innerContent' => [],
+				] 
+			);
 			$date_blocks[] = $block;
 		}
 

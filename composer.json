@@ -71,6 +71,8 @@
     ]
   },
   "scripts": {
+    "phpcs": "./vendor/bin/phpcs",
+    "phpcbf": "./vendor/bin/phpcbf",
     "release": [
       "composer install --no-dev --optimize-autoloader",
       "composer archive --format=zip --dir=release --file=newspack-custom-content-migrator"
