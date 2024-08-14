@@ -3,7 +3,6 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \WP_CLI;
 
 /**

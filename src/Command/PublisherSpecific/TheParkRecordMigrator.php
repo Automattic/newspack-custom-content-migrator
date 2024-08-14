@@ -8,7 +8,7 @@ use DOMNodeList;
 use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
@@ -35,11 +35,11 @@ class TheParkRecordMigrator implements InterfaceCommand {
 	private static $instance;
 
 	/**
-	 * CoAuthorPlus instance.
+	 * CoAuthorsPlusHelper instance.
 	 *
-	 * @var CoAuthorPlus $co_author_plus
+	 * @var CoAuthorsPlusHelper $co_author_plus
 	 */
-	private CoAuthorPlus $co_author_plus;
+	private CoAuthorsPlusHelper $co_author_plus;
 
 	/**
 	 * DOMDocument instance.
@@ -70,7 +70,7 @@ class TheParkRecordMigrator implements InterfaceCommand {
 		$class = get_called_class();
 		if ( null === self::$instance ) {
 			self::$instance                 = new $class();
-			self::$instance->co_author_plus = new CoAuthorPlus();
+			self::$instance->co_author_plus = new CoAuthorsPlusHelper();
 			self::$instance->dom            = new DOMDocument();
 			libxml_use_internal_errors( true );
 

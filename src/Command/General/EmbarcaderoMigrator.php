@@ -11,7 +11,7 @@ use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\CSVFile;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
@@ -308,7 +308,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	/**
 	 * CoAuthorsPlus instance.
 	 *
-	 * @var CoAuthorPlus $coauthorsplus_logic
+	 * @var CoAuthorsPlusHelper $coauthorsplus_logic
 	 */
 	private $coauthorsplus_logic;
 
@@ -338,7 +338,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$this->logger                    = new Logger();
 		$this->attachments               = new Attachments();
 		$this->taxonomy_logic            = new Taxonomy();
-		$this->coauthorsplus_logic       = new CoAuthorPlus();
+		$this->coauthorsplus_logic       = new CoAuthorsPlusHelper();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
 
 		$this->site_timezone = new DateTimeZone( 'America/Los_Angeles' );

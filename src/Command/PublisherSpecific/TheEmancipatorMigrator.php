@@ -11,7 +11,7 @@ use CWS_PageLinksTo;
 use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\Logger;
@@ -28,7 +28,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 
 	const SITE_TIMEZONE = 'America/New_York';
 
-	private CoAuthorPlus $coauthorsplus_logic;
+	private CoAuthorsPlusHelper $coauthorsplus_logic;
 
 	private Posts $posts_logic;
 
@@ -43,7 +43,7 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	 * Private constructor.
 	 */
 	private function __construct() {
-		$this->coauthorsplus_logic = new CoAuthorPlus();
+		$this->coauthorsplus_logic = new CoAuthorsPlusHelper();
 		$this->posts_logic         = new Posts();
 		$this->attachments_logic   = new Attachments();
 		$this->gutenberg_block_gen = new GutenbergBlockGenerator();

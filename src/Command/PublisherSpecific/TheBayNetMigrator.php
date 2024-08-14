@@ -3,7 +3,7 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use \WP_CLI;
 
 /**
@@ -166,7 +166,7 @@ class TheBayNetMigrator implements InterfaceCommand {
 	 * @param $assoc_args
 	 */
 	public function cmd_convert_users_to_gas( $args, $assoc_args ) {
-		$cap_logic = new CoAuthorPlus;
+		$cap_logic = new CoAuthorsPlusHelper;
 		global $wpdb;
 
 		$results = $wpdb->get_results( "select * from wp_users where user_email = '' ; ", ARRAY_A );

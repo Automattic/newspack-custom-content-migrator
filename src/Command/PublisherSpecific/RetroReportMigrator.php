@@ -6,7 +6,7 @@ use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\JsonIterator;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use \NewspackCustomContentMigrator\Logic\Attachments;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use \NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use \NewspackCustomContentMigrator\Logic\Sponsors;
 use \WP_CLI;
@@ -67,7 +67,7 @@ class RetroReportMigrator implements InterfaceCommand {
 	/**
 	 * CAP logic.
 	 *
-	 * @var null|CoAuthorPlus
+	 * @var null|CoAuthorsPlusHelper
 	 */
 	private $co_authors_plus;
 
@@ -136,7 +136,7 @@ class RetroReportMigrator implements InterfaceCommand {
 
 		$this->attachments = new Attachments();
 
-		$this->co_authors_plus = new CoAuthorPlus();
+		$this->co_authors_plus = new CoAuthorsPlusHelper();
 
 		$this->simple_local_avatars = new SimpleLocalAvatars();
 

@@ -6,7 +6,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use \NewspackCustomContentMigrator\Logic\Attachments;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use \NewspackCustomContentMigrator\Logic\Posts;
 use \NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 /* External dependencies */
@@ -125,7 +125,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	private function __construct() {
 		$this->logger = new Logger();
 		$this->attachments = new Attachments();
-		$this->coauthorsplus = new CoAuthorPlus();
+		$this->coauthorsplus = new CoAuthorsPlusHelper();
 		$this->simple_local_avatars = new SimpleLocalAvatars();
 		$this->posts_logic = new Posts();
 		$this->crawler = new Crawler();

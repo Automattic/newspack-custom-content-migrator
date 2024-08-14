@@ -35,6 +35,8 @@ class CoAuthorPlus {
 	 * CoAuthorPlus constructor.
 	 */
 	public function __construct() {
+		trigger_error('The CoAuthorPlus class is deprecated, use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper instead', E_USER_ERROR);
+
 		// Set Co-Authors Plus dependencies.
 		global $coauthors_plus;
 
