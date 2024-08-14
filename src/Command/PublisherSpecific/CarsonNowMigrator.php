@@ -316,12 +316,7 @@ class CarsonNowMigrator implements InterfaceCommand {
 			}
 			$img_block_class = 'cn-gallery-1-img';
 			$blocks          = GutenbergBlockManipulator::remove_blocks_with_class( $img_block_class, $post->post_content );
-			$img_block       = $this->gutenberg_block_generator->get_image( $attachment_post, 'full', false );
-			if ( empty( $img_block['attrs']['className'] ) ) {
-				$img_block['attrs']['className'] = $img_block_class;
-			} else {
-				$img_block['attrs']['className'] .= ' ' . $img_block_class;
-			}
+			$img_block       = $this->gutenberg_block_generator->get_image( $attachment_post, 'full', false, $img_block_class );
 
 			$post->post_content = serialize_blocks( [ $img_block, ...$blocks ] );
 
