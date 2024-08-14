@@ -320,7 +320,7 @@ class CarsonNowMigrator implements InterfaceCommand {
 			if ( empty( $img_block['attrs']['className'] ) ) {
 				$img_block['attrs']['className'] = $img_block_class;
 			} else {
-				$img_block['attrs']['className'] .= ',' . $img_block_class;
+				$img_block['attrs']['className'] .= ' ' . $img_block_class;
 			}
 
 			$post->post_content = serialize_blocks( [ $img_block, ...$blocks ] );
