@@ -39,6 +39,13 @@ class CarsonNowMigrator implements InterfaceCommand {
 		'optional'    => true,
 	];
 
+	private array $min_post_id_arg = [
+		'type'        => 'assoc',
+		'name'        => 'min-post-id',
+		'description' => 'Minimum post ID to include in run (inclusive).',
+		'optional'    => true,
+	];
+
 	/**
 	 * @var DateTimeZone
 	 */
@@ -113,6 +120,7 @@ class CarsonNowMigrator implements InterfaceCommand {
 				'synopsis'      => [
 					$this->refresh_existing_arg,
 					$this->num_posts_arg,
+					$this->min_post_id_arg,
 					$this->max_post_id_arg,
 				],
 				'before_invoke' => [ $this, 'preflight' ],
@@ -127,6 +135,7 @@ class CarsonNowMigrator implements InterfaceCommand {
 				'synopsis'      => [
 					$this->refresh_existing_arg,
 					$this->num_posts_arg,
+					$this->min_post_id_arg,
 					$this->max_post_id_arg,
 				],
 				'before_invoke' => [ $this, 'preflight' ],
@@ -218,10 +227,12 @@ class CarsonNowMigrator implements InterfaceCommand {
 			// Add the byline block to the beginning of the content.
 			array_unshift( $post_blocks, \Newspack_Content_Byline::get_post_meta_bound_byline_block() );
 
-			wp_update_post( [
-				'ID'           => $post->ID,
-				'post_content' => serialize_blocks( $post_blocks ),
-			] );
+			wp_update_post(
+				[
+					'ID'           => $post->ID,
+					'post_content' => serialize_blocks( $post_blocks ),
+				] 
+			);
 			// Set the byline as metadata too.
 			update_post_meta( $post->ID, \Newspack_Content_Byline::BYLINE_META_KEY, $drupal_byline );
 
@@ -238,7 +249,8 @@ class CarsonNowMigrator implements InterfaceCommand {
 	 * @return string byline
 	 */
 	private function get_drupal_byline( int $nid ): string {
-		$sql = "SELECT field_byline_value FROM drupal_content_field_byline cfb
+		$prefix = $this->get_prefix();
+		$sql    = "SELECT field_byline_value FROM {$prefix}content_field_byline cfb
 					JOIN drupal_node n ON cfb.nid = n.nid AND cfb.vid = n.vid
 					WHERE cfb.nid = $nid";
 		global $wpdb;
@@ -264,9 +276,8 @@ class CarsonNowMigrator implements InterfaceCommand {
 			if ( empty( $nid ) ) {
 				continue;
 			}
-			$images      = $this->get_drupal_images_from_nid( $nid );
 			$attachments = [];
-			foreach ( $images as $img ) {
+			foreach ( $this->get_drupal_images_from_nid( $nid ) as $img ) {
 				$attrs                 = $img['attributes'];
 				$attrs['post_excerpt'] = $attrs['description'] ?? '';
 				$attrs['post_title']   = empty( $attrs['title'] ) ? $attrs['post_excerpt'] : $attrs['title'];
@@ -298,21 +309,44 @@ class CarsonNowMigrator implements InterfaceCommand {
 			$post->post_content                  = serialize_blocks( [ $gallery_block, ...$blocks ] );
 
 			$this->logger->log( 'images.log', sprintf( 'Added gallery to post ID %d: %s', $post->ID, get_permalink( $post ) ) );
-		} else { // Some galleries only have one image – in that case we don't need a gallery block.
+		} else {
 			$attachment_post = get_post( current( $images ) );
 			if ( ! $attachment_post instanceof WP_Post ) {
 				return $post;
 			}
-			$img_block_class                 = 'cn-gallery-1-img';
-			$blocks                          = GutenbergBlockManipulator::remove_blocks_with_class( $img_block_class, $post->post_content );
-			$img_block                       = $this->gutenberg_block_generator->get_image( $attachment_post, 'full', false );
-			$img_block['attrs']['className'] = $img_block_class;
-			$post->post_content              = serialize_blocks( [ $img_block, ...$blocks ] );
+			$img_block_class = 'cn-gallery-1-img';
+			$blocks          = GutenbergBlockManipulator::remove_blocks_with_class( $img_block_class, $post->post_content );
+			$img_block       = $this->gutenberg_block_generator->get_image( $attachment_post, 'full', false, $img_block_class );
+
+			$post->post_content = serialize_blocks( [ $img_block, ...$blocks ] );
 
 			$this->logger->log( 'images.log', sprintf( 'Added image block to post ID %d: %s', $post->ID, get_permalink( $post ) ) );
 		}
 
 		return $post;
+	}
+
+	/**
+	 * Filter the options for the FG Drupal to WP plugin to use environment variables for the database connection.
+	 * Put these variables in your .env file locally (or comment out locally).
+	 *
+	 * @param array $options The options to filter.
+	 *
+	 * @return array The filtered options.
+	 * @throws ExitException
+	 */
+	public function filter_fgd2wp_options( $options ) {
+		$options['hostname'] = getenv( 'DB_HOST' );
+		$options['database'] = getenv( 'DB_NAME' );
+		$options['username'] = getenv( 'DB_USER' );
+		$options['password'] = getenv( 'DB_PASSWORD' );
+		if ( empty( $options['hostname'] ) || empty( $options['database'] ) || empty( $options['username'] ) || empty( $options['password'] ) ) {
+			WP_CLI::error( 'Could not get database connection details from environment variables.' );
+		}
+
+		$options['prefix'] = $this->get_prefix();
+
+		return $options;
 	}
 
 	/**
@@ -322,6 +356,7 @@ class CarsonNowMigrator implements InterfaceCommand {
 	 * Note that we can't batch this at all, so timeouts might be a thing.
 	 */
 	public function cmd_wrap_drupal_import( array $pos_args, array $assoc_args ): void {
+		add_filter( 'option_fgd2wp_options', [ $this, 'filter_fgd2wp_options' ] );
 		add_action( 'fgd2wp_pre_dispatch', [ $this, 'add_fg_hooks' ] );
 		// Note that the 'launch' arg is important – without it the hooks above will not be registered.
 		WP_CLI::runcommand( 'import-drupal import', [ 'launch' => false ] );
@@ -344,19 +379,19 @@ class CarsonNowMigrator implements InterfaceCommand {
 	}
 
 	public function get_image_data_from_fid( $fid, $fallback_to_imagecache = true ): array {
-
+		$prefix = $this->get_prefix();
 		global $wpdb;
-		$result = $wpdb->get_results( "SELECT * FROM drupal_files WHERE fid = $fid", ARRAY_A );
+		$result = $wpdb->get_results( "SELECT * FROM ${prefix}files WHERE fid = $fid", ARRAY_A );
 		if ( empty( $result ) ) {
 			return [];
 		}
 		$field_image = $result[0];
 
-		$img_url = 'https://www.carsonnow.org/' . $field_image['filepath'];
+		$img_url = trailingslashit( NCCM_SOURCE_WEBSITE_URL ) . $field_image['filepath'];
 
 		if ( $fallback_to_imagecache ) {
 			$request = wp_remote_head( $img_url, [ 'redirection' => 5 ] );
-			if ( empty( $request['response']['code'] ) || $request['response']['code'] === 404 ) {
+			if ( is_wp_error( $request ) || 404 === $request['response']['code'] ?? 404 ) {
 				$img_url = str_replace( '/files/', '/files/imagecache/galleryformatter_slide/', $img_url );
 			}
 		}
@@ -368,10 +403,25 @@ class CarsonNowMigrator implements InterfaceCommand {
 		];
 	}
 
+
+	/**
+	 * Get the prefix for the drupal tables.
+	 *
+	 * @return string
+	 */
+	private function get_prefix(): string {
+		if ( defined( 'NCCM_DRUPAL_PREFIX' ) && ! empty( trim( NCCM_DRUPAL_PREFIX ) ) ) {
+			return NCCM_DRUPAL_PREFIX;
+		}
+
+		return 'drupal_';
+	}
+
 	public function get_drupal_images_from_nid( int $nid ) {
-		$sql = "SELECT field_images_fid, field_images_data 
-					FROM drupal_content_field_images cfi 
-					JOIN drupal_node n ON cfi.nid = n.nid AND cfi.vid = n.vid 
+		$prefix = $this->get_prefix();
+		$sql    = "SELECT field_images_fid, field_images_data 
+					FROM {$prefix}content_field_images cfi 
+					JOIN {$prefix}node n ON cfi.nid = n.nid AND cfi.vid = n.vid 
 					WHERE cfi.nid = $nid
 					  AND cfi.field_images_list = 1
 					  AND cfi.field_images_fid IS NOT NULL
@@ -414,7 +464,6 @@ class CarsonNowMigrator implements InterfaceCommand {
 		}
 
 		return $post_type;
-
 	}
 
 	public function fg_filter_get_node_types( $node_types ) {
@@ -462,16 +511,18 @@ class CarsonNowMigrator implements InterfaceCommand {
 				return self::SKIP_IMPORTING_POST;
 			}
 
-			$block         = serialize_block( [
-				'blockName'    => 'newspack-listings/event-dates',
-				'attrs'        => [
-					'startDate' => $date->format( self::WP_DATE_FORMAT ),
-					'showTime'  => true,
-				],
-				'innerBlocks'  => [],
-				'innerHTML'    => '',
-				'innerContent' => [],
-			] );
+			$block         = serialize_block(
+				[
+					'blockName'    => 'newspack-listings/event-dates',
+					'attrs'        => [
+						'startDate' => $date->format( self::WP_DATE_FORMAT ),
+						'showTime'  => true,
+					],
+					'innerBlocks'  => [],
+					'innerHTML'    => '',
+					'innerContent' => [],
+				] 
+			);
 			$date_blocks[] = $block;
 		}
 
@@ -526,6 +577,7 @@ class CarsonNowMigrator implements InterfaceCommand {
 		if ( ! empty( $assoc_args['post-id'] ) ) {
 			$all_ids = [ $assoc_args['post-id'] ];
 		} else {
+			$min_post_id = $assoc_args['min-post-id'] ?? 0;
 			$max_post_id = $assoc_args['max-post-id'] ?? PHP_INT_MAX;
 			$num_posts   = $assoc_args['num-posts'] ?? PHP_INT_MAX;
 			global $wpdb;
@@ -537,10 +589,10 @@ class CarsonNowMigrator implements InterfaceCommand {
 			FROM {$wpdb->posts}
 			WHERE post_type IN ( $post_type_placeholders )
 			AND post_status IN ( $post_status_placeholders )
-			AND ID <= %d
+			AND ID BETWEEN %d AND %d
 			ORDER BY ID DESC
 			LIMIT %d",
-					[ ...$post_types, ...$post_statuses, $max_post_id, $num_posts ]
+					[ ...$post_types, ...$post_statuses, $min_post_id, $max_post_id, $num_posts ]
 				)
 			);
 		}
