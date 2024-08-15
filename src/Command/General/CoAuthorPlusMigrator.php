@@ -7,6 +7,7 @@ use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use \NewspackCustomContentMigrator\Logic\Posts;
 use \NewspackCustomContentMigrator\PluginSetup;
+use \NewspackCustomContentMigrator\Utils\Logger;
 use \NewspackCustomContentMigrator\Utils\PHP;
 use \WP_CLI;
 use \WP_Query;
@@ -16,6 +17,11 @@ use WP_User_Query;
  * Class for migrating Co-Authors Plus Guest Authors.
  */
 class CoAuthorPlusMigrator implements InterfaceCommand {
+
+	/**
+	 * @var Logger.
+	 */
+	private $logger;
 
 	/**
 	 * Prefix of tags which get converted to Guest Authors.
@@ -51,6 +57,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	private function __construct() {
 		$this->coauthorsplus_logic = new CoAuthorPlus();
 		$this->posts_logic         = new Posts();
+		$this->logger              = new Logger();
 	}
 
 	/**
@@ -190,6 +197,21 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 						'repeating'   => false,
 					],
 				],
+			]
+		);
+		\WP_CLI::add_command(
+			'newspack-content-migrator co-authors-link-all-users-to-existing-guest-authors',
+			[ $this, 'cmd_link_all_users_to_guest_authors' ],
+			[
+				'shortdesc' => 'Link all WP users to their existing Guest Authors counterparts based on email.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'optional'    => true,
+						'description' => 'Whether to do a dry-run without making updates.',
+					],
+				]
 			]
 		);
 		WP_CLI::add_command(
@@ -1376,6 +1398,57 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		}
 
 		return $posts;
+
+	}
+
+	/**
+	 * Callable for the 'co-authors-link-all-users-to-existing-guest-authors' command.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_link_all_users_to_guest_authors( $args, $assoc_args ) {
+
+		$dry_run  = WP_CLI\Utils\get_flag_value( $assoc_args, 'dry-run', false );
+		$log_file = 'cap-link-all-users-to-guest-authors.log';
+
+		if ( $dry_run  ) {
+			$this->logger->log( $log_file, 'Performing a dry-run. No changes will be made.' );
+		} else {
+			WP_CLI::line( 'This command will modify the database.');
+			WP_CLI::line( 'Consider running it with --dry-run first to see what it will do.');
+			WP_CLI::confirm( "Are you sure you want to continue?", $assoc_args );
+		}
+
+		$guest_authors = new \CoAuthors_Guest_Authors();
+
+		// Get the list of users.
+		$users = get_users();
+
+		foreach( $users as $user ) {
+			$ga = $guest_authors->get_guest_author_by( 'user_email', $user->user_email );
+			if ( ! $ga ) {
+				continue;
+			}
+
+			$this->logger->log( $log_file, sprintf( 'Found guest author %s for user %s', $ga->user_nicename, $user->user_email ) );
+
+			$existing_link = get_post_meta( $ga->ID, 'cap-linked_account', true );
+
+			if ( ! empty($existing_link ) ) {
+				$this->logger->log( $log_file, 'Guest author already linked to a user. Skipping.', 'warning' );
+				continue;
+			}
+			
+			if ( $dry_run ) {
+				continue;
+			}
+
+			// Link the user to the guest author.
+			$this->coauthorsplus_logic->link_guest_author_to_wp_user( $ga->ID, $user );
+			$this->logger->log( $log_file, 'Guest author linked', 'success' );
+
+		}
 
 	}
 
