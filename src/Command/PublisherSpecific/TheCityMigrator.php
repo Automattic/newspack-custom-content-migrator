@@ -4,7 +4,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use NewspackCustomContentMigrator\Command\General\ChorusCmsMigrator;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use \NewspackCustomContentMigrator\Utils\Logger;
@@ -44,7 +44,7 @@ class TheCityMigrator implements InterfaceCommand {
 	private $gutenberg_blocks;
 
 	/**
-	 * @var CoAuthorPlus $cap_logic CoAuthorPlus instance.
+	 * @var CoAuthorsPlusHelper $cap_logic CoAuthorsPlusHelper instance.
 	 */
 	private $cap_logic;
 
@@ -62,7 +62,7 @@ class TheCityMigrator implements InterfaceCommand {
 		$this->posts              = new PostsLogic();
 		$this->wpblockmanipulator = new WpBlockManipulator();
 		$this->gutenberg_blocks   = new GutenbergBlockGenerator();
-		$this->cap_logic          = new CoAuthorPlus();
+		$this->cap_logic          = new CoAuthorsPlusHelper();
 		$this->logger             = new Logger();
 	}
 

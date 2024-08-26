@@ -9,7 +9,7 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Posts;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
@@ -35,9 +35,9 @@ class MolonguiAutorship implements InterfaceCommand {
 	private $posts;
 
 	/**
-	 * CoAuthorPlus instance.
+	 * CoAuthorsPlusHelper instance.
 	 *
-	 * @var CoAuthorPlus
+	 * @var CoAuthorsPlusHelper
 	 */
 	private $cap;
 
@@ -53,7 +53,7 @@ class MolonguiAutorship implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->posts  = new Posts();
-		$this->cap    = new CoAuthorPlus();
+		$this->cap    = new CoAuthorsPlusHelper();
 		$this->logger = new Logger();
 	}
 
@@ -228,7 +228,7 @@ class MolonguiAutorship implements InterfaceCommand {
 	 *
 	 * @param int $guest_id Mologui guest author ID.
 	 *
-	 * @return array CAP creation args, see \NewspackCustomContentMigrator\Logic\CoAuthorPlus::create_guest_author().
+	 * @return array CAP creation args, see CoAuthorsPlusHelper::create_guest_author().
 	 *
 	 * @throws \UnexpectedValueException If Mologui guest author with $guest_id not found.
 	 */
@@ -408,7 +408,7 @@ class MolonguiAutorship implements InterfaceCommand {
 	 *
 	 * @param int $wpuser_id WP_User ID.
 	 *
-	 * @return array CAP creation args, see \NewspackCustomContentMigrator\Logic\CoAuthorPlus::create_guest_author().
+	 * @return array CAP creation args, see CoAuthorsPlusHelper::create_guest_author().
 	 *
 	 * @throws \UnexpectedValueException If WP_User with $wpuser_id not found.
 	 */

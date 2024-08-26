@@ -5,7 +5,7 @@ namespace NewspackCustomContentMigrator\Command\General;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\Lede;
 use \NewspackCustomContentMigrator\Logic\Posts;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use \WP_CLI;
 
 /**
@@ -35,9 +35,9 @@ class LedeMigrator implements InterfaceCommand {
 	private $posts;
 
 	/**
-	 * CoAuthorPlus instance.
+	 * CoAuthorsPlusHelper instance.
 	 *
-	 * @var CoAuthorPlus CoAuthorPlus instance.
+	 * @var CoAuthorsPlusHelper instance.
 	 */
 	private $cap;
 
@@ -47,7 +47,7 @@ class LedeMigrator implements InterfaceCommand {
 	private function __construct() {
 		$this->lede  = new Lede();
 		$this->posts = new Posts();
-		$this->cap   = new CoAuthorPlus();
+		$this->cap   = new CoAuthorsPlusHelper();
 	}
 
 	/**

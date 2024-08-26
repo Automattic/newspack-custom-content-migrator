@@ -5,7 +5,8 @@ namespace Newspack_Listings\Importer;
 use Exception;
 use Newspack_Listings\Contracts\Importer_Mode;
 use NewspackCustomContentMigrator\Command\PublisherSpecific\MigrationPostAuthors;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+
 use WP_Post;
 use WP_CLI;
 
@@ -58,7 +59,7 @@ class LaSillaVaciaPostCreatePublicationImporter extends Abstract_Callable_Post_C
 
 		$existing_original_user_ids = array_map( fn( $result ) => intval( $result->meta_value ), $results );
 
-		$co_author_plus_logic = new CoAuthorPlus();
+		$co_author_plus_logic = new CoAuthorsPlusHelper();
 
 		foreach ( $experts as $expert ) {
 			if ( in_array( $expert['id'], $existing_original_user_ids ) ) {

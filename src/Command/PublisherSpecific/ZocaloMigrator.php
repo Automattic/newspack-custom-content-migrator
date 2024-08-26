@@ -4,7 +4,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
 use WP_CLI;
@@ -15,7 +15,7 @@ class ZocaloMigrator implements InterfaceCommand {
 
 	private int $default_author_id;
 
-	private CoAuthorPlus $coauthorsplus_logic;
+	private CoAuthorsPlusHelper $coauthorsplus_logic;
 	private Logger $logger;
 
 	private function __construct() {
@@ -48,7 +48,7 @@ class ZocaloMigrator implements InterfaceCommand {
 			return;
 		}
 
-		$this->coauthorsplus_logic = new CoAuthorPlus();
+		$this->coauthorsplus_logic = new CoAuthorsPlusHelper();
 		$this->logger              = new Logger();
 
 		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {

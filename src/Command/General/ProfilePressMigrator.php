@@ -3,7 +3,7 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use \NewspackCustomContentMigrator\Logic\Posts;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use \WP_CLI;
@@ -21,9 +21,9 @@ class ProfilePress implements InterfaceCommand {
 	private static $instance = null;
 
 	/**
-	 * CoAuthorPlus logic.
+	 * CoAuthorsPlusHelper logic.
 	 *
-	 * @var CoAuthorPlus $coauthorsplus_logic
+	 * @var CoAuthorsPlusHelper $coauthorsplus_logic
 	 */
 	private $coauthorsplus_logic;
 
@@ -45,7 +45,7 @@ class ProfilePress implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->coauthorsplus_logic = new CoAuthorPlus();
+		$this->coauthorsplus_logic = new CoAuthorsPlusHelper();
 		$this->posts_logic         = new Posts();
 		$this->logger              = new Logger();
 	}

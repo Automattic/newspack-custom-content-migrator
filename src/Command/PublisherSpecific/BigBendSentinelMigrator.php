@@ -5,7 +5,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use Gravity_Forms\Gravity_Forms\Settings\Fields\Hidden;
 use \WP_CLI;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper as CoAuthorPlusLogic;
 use \NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
 use \NewspackCustomContentMigrator\Utils\Logger;
 

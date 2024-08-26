@@ -5,7 +5,7 @@ namespace NewspackCustomContentMigrator\Command\General;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use \DirectoryIterator;
 use \SimpleXMLElement;
@@ -34,7 +34,7 @@ class TownNewsMigrator implements InterfaceCommand {
 	private $attachments;
 
 	/**
-	 * @var CoAuthorPlus $coauthorsplus_logic
+	 * @var CoAuthorsPlusHelper $coauthorsplus_logic
 	 */
 	private $coauthorsplus_logic;
 
@@ -49,7 +49,7 @@ class TownNewsMigrator implements InterfaceCommand {
 	private function __construct() {
 		$this->logger                    = new Logger();
 		$this->attachments               = new Attachments();
-		$this->coauthorsplus_logic       = new CoAuthorPlus();
+		$this->coauthorsplus_logic       = new CoAuthorsPlusHelper();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
 	}
 

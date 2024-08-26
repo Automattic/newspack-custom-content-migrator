@@ -4,7 +4,7 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use cli\Streams;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlusDataFixer;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Posts;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Taxonomy;
@@ -29,9 +29,9 @@ class CoAuthorPlusDataFixingMigrator implements InterfaceCommand {
 	/**
 	 * Co-Authors Plus.
 	 *
-	 * @var CoAuthorPlus $co_authors_plus_logic CoAuthors Plus logic.
+	 * @var CoAuthorsPlusHelper $co_authors_plus_logic CoAuthors Plus logic.
 	 */
-	private CoAuthorPlus $co_authors_plus_logic;
+	private CoAuthorsPlusHelper $co_authors_plus_logic;
 
 	/**
 	 * Co-Authors Plus data fixing logic.
@@ -59,7 +59,7 @@ class CoAuthorPlusDataFixingMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->co_authors_plus_data_fixer_logic = new CoAuthorPlusDataFixer();
-		$this->co_authors_plus_logic            = new CoAuthorPlus();
+		$this->co_authors_plus_logic            = new CoAuthorsPlusHelper();
 		$this->posts_logic                      = new Posts();
 		$this->taxonomy_logic                   = new Taxonomy();
 	}
