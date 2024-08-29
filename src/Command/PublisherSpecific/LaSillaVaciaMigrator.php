@@ -14,7 +14,7 @@ use Generator;
 use NewspackCustomContentMigrator\Command\General\DownloadMissingImages;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlusDataFixer;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Posts;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Taxonomy as TaxonomyConsoleOutputLogic;
@@ -594,7 +594,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	private static $instance;
 
 	/**
-	 * @var CoAuthorPlus $coauthorsplus_logic
+	 * @var CoAuthorsPlusHelper $coauthorsplus_logic
 	 */
 	private $coauthorsplus_logic;
 
@@ -683,7 +683,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->log_file_path                   = gmdate( 'YmdHis', time() ) . 'LSV_import.log';
-		$this->coauthorsplus_logic             = new CoAuthorPlus();
+		$this->coauthorsplus_logic             = new CoAuthorsPlusHelper();
 		$this->co_author_plus_data_fixer_logic = new CoAuthorPlusDataFixer();
 		$this->simple_local_avatars            = new SimpleLocalAvatars();
 		$this->redirection                     = new Redirection();
@@ -9733,7 +9733,7 @@ BLOCK;
 
 class MigrationAuthor {
 
-	protected CoAuthorPlus $coauthorsplus_logic;
+	protected CoAuthorsPlusHelper $coauthorsplus_logic;
 
 	protected int $original_system_id;
 
@@ -9748,7 +9748,7 @@ class MigrationAuthor {
 	 */
 	public function __construct( int $original_system_id ) {
 		$this->original_system_id  = $original_system_id;
-		$this->coauthorsplus_logic = new CoAuthorPlus();
+		$this->coauthorsplus_logic = new CoAuthorsPlusHelper();
 		$this->find_user_from_original_system_id();
 		$this->set_output_description();
 	}
@@ -9906,7 +9906,7 @@ class MigrationAuthor {
 class MigrationPostAuthors {
 
 
-	protected CoAuthorPlus $coauthorsplus_logic;
+	protected CoAuthorsPlusHelper $coauthorsplus_logic;
 
 	/**
 	 * @var MigrationAuthor[] $authors
@@ -9922,7 +9922,7 @@ class MigrationPostAuthors {
 	 * @throws Exception
 	 */
 	public function __construct( array $original_author_ids ) {
-		$this->coauthorsplus_logic = new CoAuthorPlus();
+		$this->coauthorsplus_logic = new CoAuthCoAuthorsPlusHelperorPlus();
 
 		foreach ( $original_author_ids as $original_author_id ) {
 			$author = new MigrationAuthor( $original_author_id );

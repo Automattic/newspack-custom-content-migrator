@@ -3,7 +3,9 @@ declare(ticks=1);
 
 namespace NewspackCustomContentMigrator;
 
-use \WP_CLI;
+use Newspack\MigrationTools\Command\WpCliCommandInterface;
+use Newspack\MigrationTools\Command\WpCliCommands;
+use WP_CLI;
 
 /**
  * PluginSetup class.
@@ -59,6 +61,16 @@ class PluginSetup {
 	 * @param array $migrator_classes Array of Command\InterfaceCommand classes.
 	 */
 	public static function register_migrators( $migrator_classes ) {
+
+		foreach ( WpCliCommands::get_classes_with_cli_commands() as $command_class ) {
+			$class = $command_class::get_instance();
+			if ( is_a( $class, WpCliCommandInterface::class ) ) {
+				array_map( function ( $command ) {
+					WP_CLI::add_command( ...$command );
+				}, $class->get_cli_commands() );
+			}
+		}
+
 		foreach ( $migrator_classes as $migrator_class ) {
 			$migrator = $migrator_class::get_instance();
 			if ( $migrator instanceof Command\InterfaceCommand ) {
@@ -120,4 +132,36 @@ class PluginSetup {
 			}
 		}
 	}
+
+	/**
+	 * Add hooks for all commands.
+	 *
+	 * Note that to add a hook for a specific command, you should add it in the command class in the command (not the constructor).
+	 * That way it only applies to that command/publisher when run.
+	 *
+	 * @return void
+	 */
+	public static function add_hooks(): void {
+		// Disable the simple CLI logging from the migration tools and use WP_CLI's version.
+		add_filter('newspack_migration_tools_log_clilog_disable', '__return_true' );
+
+		// And use our fancy WP_CLI logger instead.
+		add_action( 'newspack_migration_tools_cli_log', [ __CLASS__, 'action_cli_log' ], 10, 3 );
+	}
+
+	/**
+	 * @param string $message Message to log.
+	 * @param string $level Log level - see constants in Logger class.
+	 * @param bool $exit_on_error If true, will exit the script on error.
+	 *
+	 * @return void
+	 */
+	public static function action_cli_log( string $message, string $level, bool $exit_on_error ): void {
+		static $logger = null;
+		if ( is_null( $logger ) ) {
+			$logger = new Utils\Logger();
+		}
+		$logger->wp_cli_log( $message, $level, $exit_on_error );
+	}
+
 }

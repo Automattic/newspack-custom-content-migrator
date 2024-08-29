@@ -2,12 +2,10 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \CoAuthors_Guest_Authors;
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use \NewspackCustomContentMigrator\Logic\Posts;
 use \NewspackCustomContentMigrator\PluginSetup;
-use \NewspackCustomContentMigrator\Utils\PHP;
 use \WP_CLI;
 use \WP_Query;
 use WP_User_Query;
@@ -34,7 +32,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	/**
 	 * Co-Authors Plus.
 	 *
-	 * @var CoAuthorPlus $coauthorsplus_logic Co-Authors Plus logic.
+	 * @var CoAuthorsPlusHelper $coauthorsplus_logic Co-Authors Plus logic.
 	 */
 	private $coauthorsplus_logic;
 
@@ -49,7 +47,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->coauthorsplus_logic = new CoAuthorPlus();
+		$this->coauthorsplus_logic = new CoAuthorsPlusHelper();
 		$this->posts_logic         = new Posts();
 	}
 
@@ -613,7 +611,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Installs the CAP plugin, and reinitializes the \NewspackCustomContentMigrator\Logic\CoAuthorPlus dependency.
+	 * Installs the CAP plugin, and reinitializes the Newspack\MigrationTools\Logic\CoAuthorsPlusHelper dependency.
 	 */
 	public function require_cap_plugin() {
 		if ( false === $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
@@ -623,7 +621,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 			PluginSetup::setup_coauthors_plus();
 
 			// reinitialize the CAP dependency.
-			$this->coauthorsplus_logic = new CoAuthorPlus();
+			$this->coauthorsplus_logic = new CoAuthorsPlusHelper();
 		}
 	}
 
@@ -895,7 +893,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		$ga_id   = isset( $assoc_args['ga_id'] ) ? (int) $assoc_args['ga_id'] : null;
 		$user_id = isset( $assoc_args['user_id'] ) ? (int) $assoc_args['user_id'] : null;
 
-		$guest_author = $this->coauthorsplus_logic->get_guest_author_by( 'ID', $ga_id );
+		$guest_author = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
 		$user         = get_user_by( 'id', $user_id );
 		if ( ! $guest_author ) {
 			WP_CLI::error( sprintf( 'Guest Author by ID %d not found.', $ga_id ) );

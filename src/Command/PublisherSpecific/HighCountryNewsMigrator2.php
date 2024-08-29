@@ -7,7 +7,7 @@ use DateTimeZone;
 use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockManipulator;
 use NewspackCustomContentMigrator\Logic\Posts;
@@ -26,9 +26,9 @@ use WP_User;
 class HighCountryNewsMigrator2 implements InterfaceCommand {
 
 	/**
-	 * @var CoAuthorPlus $coauthorsplus_logic
+	 * @var CoAuthorsPlusHelper $coauthorsplus_logic
 	 */
-	private CoAuthorPlus $coauthorsplus_logic;
+	private CoAuthorsPlusHelper $coauthorsplus_logic;
 
 	/**
 	 * @var Logger.
@@ -133,7 +133,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	private DateTimeZone $site_timezone;
 
 	private function __construct() {
-		$this->coauthorsplus_logic       = new CoAuthorPlus();
+		$this->coauthorsplus_logic       = new CoAuthorsPlusHelper();
 		$this->redirection               = new Redirection();
 		$this->logger                    = new Logger();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();

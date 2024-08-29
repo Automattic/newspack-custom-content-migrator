@@ -13,7 +13,7 @@ use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlusDataFixer;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
@@ -312,7 +312,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	/**
 	 * CoAuthorsPlus instance.
 	 *
-	 * @var CoAuthorPlus $coauthorsplus_logic
+	 * @var CoAuthorsPlusHelper $coauthorsplus_logic
 	 */
 	private $coauthorsplus_logic;
 
@@ -347,7 +347,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$this->logger                    = new Logger();
 		$this->attachments               = new Attachments();
 		$this->taxonomy_logic            = new Taxonomy();
-		$this->coauthorsplus_logic       = new CoAuthorPlus();
+		$this->coauthorsplus_logic       = new CoAuthorsPlusHelper();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
 		$this->cap_data_fixer            = new CoAuthorPlusDataFixer();
 

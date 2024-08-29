@@ -10,7 +10,7 @@ use DateTimeZone;
 use DOMElement;
 use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use WP_CLI;
@@ -28,11 +28,11 @@ class QCityMetroMigrator implements InterfaceCommand {
 	private static $instance;
 
 	/**
-	 * CoAuthorPlus instance.
+	 * CoAuthorsPlusHelper instance.
 	 *
-	 * @var CoAuthorPlus|null CoAuthorPlus instance.
+	 * @var CoAuthorsPlusHelper|null CoAuthorsPlusHelper instance.
 	 */
-	protected ?CoAuthorPlus $coauthorplus;
+	protected ?CoAuthorsPlusHelper $coauthorplus;
 
 	/**
 	 * Get Instance.
@@ -44,7 +44,7 @@ class QCityMetroMigrator implements InterfaceCommand {
 
 		if ( null === self::$instance ) {
 			self::$instance               = new $class();
-			self::$instance->coauthorplus = new CoAuthorPlus();
+			self::$instance->coauthorplus = new CoAuthorsPlusHelper();
 		}
 
 		return self::$instance;

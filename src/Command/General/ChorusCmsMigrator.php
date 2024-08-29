@@ -3,7 +3,7 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use \NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Logic\Posts;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
@@ -177,7 +177,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	/**
 	 * CoAuthors Plus instance.
 	 *
-	 * @var CoAuthorPlus CoAuthors Plus instance.
+	 * @var CoAuthorsPlusHelper CoAuthors Plus instance.
 	 */
 	private $coauthors_plus;
 
@@ -227,7 +227,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->coauthors_plus   = new CoAuthorPlus();
+		$this->coauthors_plus   = new CoAuthorsPlusHelper();
 		$this->logger           = new Logger();
 		$this->attachments      = new Attachments();
 		$this->posts            = new Posts();

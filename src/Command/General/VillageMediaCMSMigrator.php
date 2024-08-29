@@ -10,7 +10,7 @@ use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\Logger;
 use stdClass;
@@ -49,9 +49,9 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 	/**
 	 * CoAuthorsPlus.
 	 *
-	 * @var CoAuthorPlus
+	 * @var CoAuthorsPlusHelper
 	 */
-	private CoAuthorPlus $cap;
+	private CoAuthorsPlusHelper $cap;
 	
 	/**
 	 * Posts.
@@ -88,7 +88,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 	private function __construct() {
 		$this->attachments     = new Attachments();
 		$this->block_generator = new GutenbergBlockGenerator();
-		$this->cap             = new CoAuthorPlus();
+		$this->cap             = new CoAuthorsPlusHelper();
 		$this->posts           = new Posts();
 		$this->logger          = new Logger();
 	}

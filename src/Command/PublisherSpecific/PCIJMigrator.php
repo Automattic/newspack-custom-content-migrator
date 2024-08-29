@@ -5,7 +5,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use WP_CLI;
@@ -29,9 +29,9 @@ class PCIJMigrator implements InterfaceCommand {
 	/**
 	 * Class containing custom Co-Authors Plus logic.
 	 *
-	 * @var CoAuthorPlus $co_authors_plus_logic
+	 * @var CoAuthorsPlusHelper $co_authors_plus_logic
 	 */
-	private CoAuthorPlus $co_authors_plus_logic;
+	private CoAuthorsPlusHelper $co_authors_plus_logic;
 
 	/**
 	 * Class containing custom Attachments logic.
@@ -46,7 +46,7 @@ class PCIJMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	private function __construct() {
-		$this->co_authors_plus_logic = new CoAuthorPlus();
+		$this->co_authors_plus_logic = new CoAuthorsPlusHelper();
 		$this->attachments           = new Attachments();
 	}
 

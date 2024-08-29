@@ -2,6 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use WP_Error;
 
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Taxonomy as TaxonomyConsoleOutputLogic;
@@ -14,9 +15,9 @@ class CoAuthorPlusDataFixer {
 	/**
 	 * Legacy Custom CAP logic.
 	 *
-	 * @var CoAuthorPlus $co_authors_plus CoAuthors Plus class instance.
+	 * @var CoAuthorsPlusHelper $co_authors_plus CoAuthors Plus class instance.
 	 */
-	private CoAuthorPlus $co_authors_plus;
+	private CoAuthorsPlusHelper $co_authors_plus;
 
 	/**
 	 * Taxonomy and console output logic.
@@ -29,7 +30,7 @@ class CoAuthorPlusDataFixer {
 	 * Constructor.
 	 */
 	public function __construct() {
-		$this->co_authors_plus               = new CoAuthorPlus();
+		$this->co_authors_plus               = new CoAuthorsPlusHelper();
 		$this->taxonomy_console_output_logic = new TaxonomyConsoleOutputLogic();
 	}
 

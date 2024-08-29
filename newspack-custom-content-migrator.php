@@ -22,6 +22,7 @@ require_once ABSPATH . 'wp-settings.php';
 
 PluginSetup::configure_error_reporting();
 PluginSetup::register_ticker();
+PluginSetup::add_hooks();
 PluginSetup::register_migrators(
 	array(
 		// General.
@@ -82,6 +83,7 @@ PluginSetup::register_migrators(
 		// Publisher specific, remove when launched.
 		Command\PublisherSpecific\SoccerAmericaMigrator::class,
 		Command\PublisherSpecific\LaSillaVaciaMigrator::class,
+		Command\PublisherSpecific\TheParkRecordMigrator::class,
 		Command\PublisherSpecific\NewsroomNZMigrator::class,
 		Command\PublisherSpecific\LatinFinanceMigrator::class,
 		Command\PublisherSpecific\PCIJMigrator::class,

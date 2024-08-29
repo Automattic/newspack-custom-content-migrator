@@ -8,7 +8,7 @@ use DOMDocument;
 use DOMElement;
 use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Utils\MigrationMeta;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
@@ -29,7 +29,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 	private static $instance;
 
 	/**
-	 * @var CoAuthorPlus $coauthorsplus_logic
+	 * @var CoAuthorsPlusHelper $coauthorsplus_logic
 	 */
 	private $coauthorsplus_logic;
 
@@ -75,7 +75,7 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 
 		if ( null === self::$instance ) {
 			self::$instance                            = new $class();
-			self::$instance->coauthorsplus_logic       = new CoAuthorPlus();
+			self::$instance->coauthorsplus_logic       = new CoAuthorsPlusHelper();
 			self::$instance->redirection               = new Redirection();
 			self::$instance->logger                    = new Logger();
 			self::$instance->gutenberg_block_generator = new GutenbergBlockGenerator();

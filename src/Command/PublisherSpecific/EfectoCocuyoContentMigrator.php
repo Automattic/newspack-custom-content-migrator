@@ -4,7 +4,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use stdClass;
 use WP_CLI;
@@ -38,7 +38,7 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->coauthorsplus_logic = new CoAuthorPlus();
+		$this->coauthorsplus_logic = new CoAuthorsPlusHelper();
 		$this->simple_local_avatar_logic = new SimpleLocalAvatars();
 		$this->attachments = new Attachments();
 	}
