@@ -9,7 +9,7 @@ use DOMElement;
 use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use NewspackCustomContentMigrator\Utils\MigrationMeta;
+use Newspack\MigrationTools\Util\MigrationMeta;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
 use NewspackCustomContentMigrator\Utils\JsonIterator;

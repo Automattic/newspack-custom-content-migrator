@@ -15,7 +15,7 @@ use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\Logger;
-use NewspackCustomContentMigrator\Utils\MigrationMeta;
+use Newspack\MigrationTools\Util\MigrationMeta;
 use simplehtmldom\HtmlDocument;
 use WP_CLI;
 use WP_CLI\ExitException;

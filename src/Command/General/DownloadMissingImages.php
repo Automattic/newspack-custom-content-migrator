@@ -6,7 +6,7 @@ use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\Logger;
-use NewspackCustomContentMigrator\Utils\MigrationMeta;
+use Newspack\MigrationTools\Util\MigrationMeta;
 use WP_CLI;
 
 class DownloadMissingImages implements InterfaceCommand {
