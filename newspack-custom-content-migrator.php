@@ -81,22 +81,7 @@ PluginSetup::register_migrators(
 		Command\General\GhostCMSMigrator::class,
 
 		// Publisher specific, remove when launched.
-		Command\PublisherSpecific\SoccerAmericaMigrator::class,
-		Command\PublisherSpecific\LaSillaVaciaMigrator::class,
-		Command\PublisherSpecific\TheParkRecordMigrator::class,
-		Command\PublisherSpecific\NewsroomNZMigrator::class,
-		Command\PublisherSpecific\LatinFinanceMigrator::class,
-		Command\PublisherSpecific\PCIJMigrator::class,
 		Command\PublisherSpecific\CarsonNowMigrator::class,
-		Command\PublisherSpecific\DallasExaminerMigrator::class,
-		Command\PublisherSpecific\TheCityMigrator::class,
-		Command\PublisherSpecific\LinkNYCMigrator::class,
-		Command\PublisherSpecific\WindyCityMigrator::class,
-		Command\PublisherSpecific\TheFriscMigrator::class,
-		Command\PublisherSpecific\CityViewMigrator::class,
-		Command\PublisherSpecific\BigBendSentinelMigrator::class,
-		Command\PublisherSpecific\LAFocusMigrator::class,
-		Command\PublisherSpecific\TheFifthEstateMigrator::class,
 		Command\PublisherSpecific\ArkansasTimesMigrator::class,
 		Command\PublisherSpecific\ZocaloMigrator::class,
 	)
