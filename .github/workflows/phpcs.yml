@@ -15,7 +15,7 @@ jobs:
           fetch-depth: 0
 
       - name: Remove private package
-        run: composer remove automattic/newspack-migration-tools --no-update
+        run: composer remove automattic/newspack-migration-tools
 
       - name: Install dependencies using the lock file
         run: composer install
