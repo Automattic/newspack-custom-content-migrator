@@ -1,10 +1,8 @@
 <?php
 
-namespace NewspackCustomContentMigrator\Command\PublisherSpecific\CustomListingsFiles\LaSillaVacia;
+namespace Newspack_Listings\Importer;
 
 use Newspack_Listings\Contracts\Importer_Mode;
-use Newspack_Listings\Importer\Abstract_Callable_Pre_Create;
-use function Newspack_Listings\Importer\sort;
 
 class LaSillaVaciaPreCreateEventImporter extends Abstract_Callable_Pre_Create
 {
