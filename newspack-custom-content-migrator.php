@@ -13,7 +13,7 @@
 namespace NewspackCustomContentMigrator;
 
 // Don't do anything outside WP CLI.
-if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
+if (!defined( 'WP_CLI' ) || ! WP_CLI ){
 	return;
 }
 
