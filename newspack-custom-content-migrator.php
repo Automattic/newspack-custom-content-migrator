@@ -2,10 +2,10 @@
 /**
  * Plugin Name: Newspack Custom Content Migrator
  * Description: A set of tools in CLI environment to assist during a Newspack site content migration.
- * Plugin URI:  https://newspack.blog/
+ * Plugin URI:  https://newspack.com
  * Author:      Automattic
- * Author URI:  https://newspack.blog/
- * Version:     1.5.4
+ * Author URI:  https://newspack.com
+ * Version:     1.6.0
  *
  * @package  Newspack_Custom_Content_Migrator
  */
