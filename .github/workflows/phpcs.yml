@@ -14,10 +14,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Remove private package
-        run: composer remove automattic/newspack-migration-tools
-
-      - name: Install dependencies using the lock file
+      - name: Install dependencies
         run: composer install
 
       - name: Run PHP CodeSniffer
