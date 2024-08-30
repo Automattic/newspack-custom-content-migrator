@@ -1,14 +1,14 @@
 <?php
 
-namespace Newspack_Listings\Importer;
+namespace NewspackCustomContentMigrator\Command\PublisherSpecific\CustomListingsFiles\LaSillaVacia;
 
 use Exception;
-use Newspack_Listings\Contracts\Importer_Mode;
-use NewspackCustomContentMigrator\Command\PublisherSpecific\MigrationPostAuthors;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-
-use WP_Post;
+use Newspack_Listings\Contracts\Importer_Mode;
+use Newspack_Listings\Importer\Abstract_Callable_Post_Create;
+use NewspackCustomContentMigrator\Command\PublisherSpecific\MigrationPostAuthors;
 use WP_CLI;
+use WP_Post;
 
 class LaSillaVaciaPostCreatePublicationImporter extends Abstract_Callable_Post_Create
 {

@@ -2,12 +2,12 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \WP_CLI;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator as SquareBracketsElementManipulator;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator as WpBlockManipulator;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Command\PublisherSpecific\Exceptions\Onthewight_No_Wpshortode_Blocks_Found_In_Post;
 use PHPHtmlParser\Dom as Dom;
-use \NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator as WpBlockManipulator;
-use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator as SquareBracketsElementManipulator;
-use \NewspackCustomContentMigrator\Command\PublisherSpecific\Exceptions\Onthewight_No_Wpshortode_Blocks_Found_In_Post;
+use WP_CLI;
 
 /**
  * Custom migration scripts for On The Wight.

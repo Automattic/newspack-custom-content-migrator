@@ -1,8 +1,10 @@
 <?php
 
-namespace Newspack_Listings\Importer;
+namespace NewspackCustomContentMigrator\Command\PublisherSpecific\CustomListingsFiles\LaSillaVacia;
 
 use Newspack_Listings\Contracts\Importer_Mode;
+use Newspack_Listings\Importer\Abstract_Callable_Post_Create;
+use Newspack_Listings\Importer\WP_Post;
 
 class LaSillaVaciaPostCreateEventImporter extends Abstract_Callable_Post_Create
 {
