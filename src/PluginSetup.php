@@ -72,9 +72,8 @@ class PluginSetup {
 		}
 
 		foreach ( $migrator_classes as $migrator_class ) {
-			$migrator = $migrator_class::get_instance();
-			if ( $migrator instanceof Command\InterfaceCommand ) {
-				$migrator->register_commands();
+			if ( is_a($migrator_class, Command\InterfaceCommand::class, true) ) {
+				$migrator_class::register_commands();
 			}
 		}
 	}

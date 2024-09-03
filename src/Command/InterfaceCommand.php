@@ -7,6 +7,6 @@ interface InterfaceCommand {
 	/**
 	 * Ensures that the commands will be registered by calling this method.
 	 */
-	public function register_commands();
+	public static function register_commands();
 
 }
