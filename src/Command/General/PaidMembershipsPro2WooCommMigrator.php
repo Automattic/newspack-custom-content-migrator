@@ -1,14 +1,14 @@
 <?php
 
-namespace NewspackCustomContentMigrator\Migrator\General;
+namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
-use WP_CLI;
+use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use \WP_CLI;
 
-class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
+class PaidMembershipsPro2WooCommMigrator implements InterfaceCommand {
 
 	/**
-	 * @var null|InterfaceMigrator Instance.
+	 * @var null|InterfaceCommand Instance.
 	 */
 	private static $instance = null;
 
@@ -21,7 +21,7 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 	/**
 	 * Singleton get_instance().
 	 *
-	 * @return InterfaceMigrator|null
+	 * @return InterfaceCommand|null
 	 */
 	public static function get_instance() {
 		$class = get_called_class();
@@ -36,9 +36,6 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 	 * See InterfaceMigrator::register_commands.
 	 */
 	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator pmp-2-woocomm-debug-importer-csv', [ $this, 'cmd_debug_importer_csv' ], [
-			'shortdesc' => 'Exports Newspack Campaigns.',
-		] );
 		WP_CLI::add_command( 'newspack-content-migrator pmp-2-woocomm-import', [ $this, 'cmd_import' ], [
 			'shortdesc' => 'Exports Newspack Campaigns.',
 			// 'synopsis'  => [
@@ -51,10 +48,6 @@ class PaidMembershipsPro2WooCommMigrator implements InterfaceMigrator {
 			// 	],
 			// ],
 		] );
-	}
-
-	public function cmd_debug_importer_csv( $args, $assoc_args ) {
-		$file_csv = isset( $assoc_args[ 'woocomm-csv' ] ) ? $assoc_args[ 'woocomm-csv' ] : null;
 	}
 
 	/**
