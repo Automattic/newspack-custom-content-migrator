@@ -63,16 +63,15 @@ class PluginSetup {
 	public static function register_migrators( $migrator_classes ) {
 
 		foreach ( WpCliCommands::get_classes_with_cli_commands() as $command_class ) {
-			$class = $command_class::get_instance();
-			if ( is_a( $class, WpCliCommandInterface::class ) ) {
+			if ( is_a( $command_class, WpCliCommandInterface::class, true ) ) {
 				array_map( function ( $command ) {
 					WP_CLI::add_command( ...$command );
-				}, $class->get_cli_commands() );
+				}, $command_class::get_cli_commands() );
 			}
 		}
 
 		foreach ( $migrator_classes as $migrator_class ) {
-			if ( is_a($migrator_class, Command\InterfaceCommand::class, true) ) {
+			if ( is_a( $migrator_class, Command\InterfaceCommand::class, true ) ) {
 				$migrator_class::register_commands();
 			}
 		}
