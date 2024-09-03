@@ -3,7 +3,6 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Command\General\PostsMigrator;
 use \NewspackCustomContentMigrator\Logic\Attachments;
 use \WP_CLI;
 
@@ -20,41 +19,10 @@ class SettingsMigrator implements InterfaceCommand {
 	const SITE_IDENTITY_EXPORTED_OPTIONS_FILENAME = 'newspack-site-identity-exported-options.json';
 
 	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
-	/**
-	 * @var Attachments $attachments_logic
-	 */
-	private $attachments_logic = null;
-
-	/**
-	 * Constructor.
-	 */
-	private function __construct() {
-		$this->attachments_logic = new Attachments();
-	}
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class;
-		}
-
-		return self::$instance;
-	}
-
-	/**
 	 * See InterfaceCommand::register_commands.
 	 */
-	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator export-pages-settings', array( $this, 'cmd_export_pages_settings' ), [
+	public static function register_commands() {
+		WP_CLI::add_command( 'newspack-content-migrator export-pages-settings', array( __CLASS__, 'cmd_export_pages_settings' ), [
 			'shortdesc' => 'Exports settings for default Site Pages.',
 			'synopsis'  => [
 				[
@@ -67,7 +35,7 @@ class SettingsMigrator implements InterfaceCommand {
 			],
 		] );
 
-		WP_CLI::add_command( 'newspack-content-migrator import-pages-settings', array( $this, 'cmd_import_pages_settings' ), [
+		WP_CLI::add_command( 'newspack-content-migrator import-pages-settings', array( __CLASS__, 'cmd_import_pages_settings' ), [
 			'shortdesc' => 'Imports custom CSS from the export XML file.',
 			'synopsis'  => [
 				[
@@ -80,7 +48,7 @@ class SettingsMigrator implements InterfaceCommand {
 			],
 		] );
 
-		WP_CLI::add_command( 'newspack-content-migrator export-customize-site-identity-settings', array( $this, 'cmd_export_customize_site_identity_settings' ), [
+		WP_CLI::add_command( 'newspack-content-migrator export-customize-site-identity-settings', array( __CLASS__, 'cmd_export_customize_site_identity_settings' ), [
 			'shortdesc' => 'Exports Customizer site identity settings.',
 			'synopsis'  => [
 				[
@@ -93,7 +61,7 @@ class SettingsMigrator implements InterfaceCommand {
 			],
 		] );
 
-		WP_CLI::add_command( 'newspack-content-migrator import-customize-site-identity-settings', array( $this, 'cmd_import_customize_site_identity_settings' ), [
+		WP_CLI::add_command( 'newspack-content-migrator import-customize-site-identity-settings', array( __CLASS__, 'cmd_import_customize_site_identity_settings' ), [
 			'shortdesc' => 'Imports Customizer site identity settings from the Staging site.',
 			'synopsis'  => [
 				[
@@ -106,7 +74,7 @@ class SettingsMigrator implements InterfaceCommand {
 			],
 		] );
 
-		WP_CLI::add_command( 'newspack-content-migrator update-seo-settings', array( $this, 'cmd_update_seo_settings' ), [
+		WP_CLI::add_command( 'newspack-content-migrator update-seo-settings', array( __CLASS__, 'cmd_update_seo_settings' ), [
 			'shortdesc' => 'Checks and sets SEO settings.',
 		] );
 
@@ -118,7 +86,7 @@ class SettingsMigrator implements InterfaceCommand {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_export_customize_site_identity_settings( $args, $assoc_args ) {
+	public static function cmd_export_customize_site_identity_settings( $args, $assoc_args ) {
 		$output_dir = isset( $assoc_args[ 'output-dir' ] ) ? $assoc_args[ 'output-dir' ] : null;
 		if ( is_null( $output_dir ) || ! is_dir( $output_dir ) ) {
 			WP_CLI::error( 'Invalid output dir.' );
@@ -126,7 +94,7 @@ class SettingsMigrator implements InterfaceCommand {
 
 		WP_CLI::line( sprintf( 'Exporting site identity settings...' ) );
 
-		$result = $this->export_current_theme_site_identity( $output_dir );
+		$result = self::export_current_theme_site_identity( $output_dir );
 		if ( false !== $result ) {
 			WP_CLI::success( 'Done.' );
 			exit(0);
@@ -143,7 +111,7 @@ class SettingsMigrator implements InterfaceCommand {
 	 *
 	 * @return bool Success.
 	 */
-	private function export_current_theme_site_identity( $output_dir ) {
+	private static function export_current_theme_site_identity( $output_dir ) {
 		wp_cache_flush();
 
 		// Get theme mods with IDs.
@@ -182,7 +150,7 @@ class SettingsMigrator implements InterfaceCommand {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_import_customize_site_identity_settings( $args, $assoc_args ) {
+	public static function cmd_import_customize_site_identity_settings( $args, $assoc_args ) {
 		$input_dir = isset( $assoc_args[ 'input-dir' ] ) ? $assoc_args[ 'input-dir' ] : null;
 		if ( is_null( $input_dir ) || ! is_dir( $input_dir ) ) {
 			WP_CLI::error( 'Invalid input dir.' );
@@ -193,6 +161,7 @@ class SettingsMigrator implements InterfaceCommand {
 			WP_CLI::warning( sprintf( 'Site identity settings file not found %s.', $options_import_file ) );
 			exit(1);
 		}
+		$attachments_logic = new Attachments();
 
 		WP_CLI::line( 'Importing site identity settings from ' . $options_import_file . ' ...' );
 
@@ -204,7 +173,7 @@ class SettingsMigrator implements InterfaceCommand {
 		if ( isset( $imported_mods_and_options['custom_logo_file'] ) && ! empty( $imported_mods_and_options['custom_logo_file'] ) ) {
 			$logo_file = $imported_mods_and_options['custom_logo_file'];
 			if ( file_exists( $logo_file ) ) {
-				$logo_id = $this->attachments_logic->import_media_from_path( $logo_file );
+				$logo_id = $attachments_logic->import_media_from_path( $logo_file );
 			}
 		}
 
@@ -213,18 +182,18 @@ class SettingsMigrator implements InterfaceCommand {
 		if ( isset( $imported_mods_and_options['newspack_footer_logo_file'] ) && ! empty( $imported_mods_and_options['newspack_footer_logo_file'] ) ) {
 			$footer_logo_file = $imported_mods_and_options['newspack_footer_logo_file'];
 			if ( file_exists( $footer_logo_file ) ) {
-				$footer_logo_id = $this->attachments_logic->import_media_from_path( $footer_logo_file );
+				$footer_logo_id = $attachments_logic->import_media_from_path( $footer_logo_file );
 			}
 		}
 
 		// Set current Theme mods IDs.
-		$this->update_theme_mod_site_identity_post_ids( $logo_id, $footer_logo_id );
+		self::update_theme_mod_site_identity_post_ids( $logo_id, $footer_logo_id );
 
 		// Import and set the site icon.
 		if ( isset( $imported_mods_and_options['site_icon_file'] ) && ! empty( $imported_mods_and_options['site_icon_file'] ) ) {
 			$icon_file = $imported_mods_and_options['site_icon_file'];
 			if ( file_exists( $icon_file ) ) {
-				$icon_id = $this->attachments_logic->import_media_from_path( $icon_file );
+				$icon_id = $attachments_logic->import_media_from_path( $icon_file );
 				if ( is_numeric( $icon_id ) ) {
 					update_option( 'site_icon', $icon_id );
 				}
@@ -240,7 +209,7 @@ class SettingsMigrator implements InterfaceCommand {
 	 * @param int $logo_id
 	 * @param int $footer_logo_id
 	 */
-	private function update_theme_mod_site_identity_post_ids( $logo_id = null, $footer_logo_id = null ) {
+	private static function update_theme_mod_site_identity_post_ids( $logo_id = null, $footer_logo_id = null ) {
 		wp_cache_flush();
 
 		if ( $logo_id ) {
@@ -257,7 +226,7 @@ class SettingsMigrator implements InterfaceCommand {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_export_pages_settings( $args, $assoc_args ) {
+	public static function cmd_export_pages_settings( $args, $assoc_args ) {
 		$output_dir = isset( $assoc_args[ 'output-dir' ] ) ? $assoc_args[ 'output-dir' ] : null;
 		if ( is_null( $output_dir ) || ! is_dir( $output_dir ) ) {
 			WP_CLI::error( 'Invalid output dir.' );
@@ -292,7 +261,7 @@ class SettingsMigrator implements InterfaceCommand {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_import_pages_settings( $args, $assoc_args ) {
+	public static function cmd_import_pages_settings( $args, $assoc_args ) {
 		$input_dir = isset( $assoc_args[ 'input-dir' ] ) ? $assoc_args[ 'input-dir' ] : null;
 		if ( is_null( $input_dir ) || ! is_dir( $input_dir ) ) {
 			WP_CLI::error( 'Invalid input dir.' );
@@ -311,7 +280,6 @@ class SettingsMigrator implements InterfaceCommand {
 		}
 
 		$options = json_decode( $contents, true );
-		$posts_migrator = PostsMigrator::get_instance();
 
 		// Copy over these as they are.
 		$option_names = array( 'show_on_front' );
@@ -324,7 +292,7 @@ class SettingsMigrator implements InterfaceCommand {
 		foreach ( $option_names as $option_name ) {
 			$original_id = isset( $options[ $option_name ] ) && ! empty( $options[ $option_name ] ) ? $options[ $option_name ] : null;
 			if ( null !== $original_id && 0 != $original_id) {
-				$current_id = $posts_migrator->get_current_post_id_from_original_post_id( $original_id );
+				$current_id = PostsMigrator::get_current_post_id_from_original_post_id( $original_id );
 				update_option( $option_name, $current_id );
 			}
 		}
@@ -338,12 +306,12 @@ class SettingsMigrator implements InterfaceCommand {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_update_seo_settings( $args, $assoc_args ) {
+	public static function cmd_update_seo_settings( $args, $assoc_args ) {
 		WP_CLI::success( 'Disabling Yoast XML sitemaps...' );
-		$this->turn_off_yoast_xml_sitemap();
+		self::turn_off_yoast_xml_sitemap();
 
 		WP_CLI::success( 'Unchecking the `Discourage search engines from indexing this site` option...' );
-		$this->uncheck_discourage_search_engines();
+		self::uncheck_discourage_search_engines();
 
 		WP_CLI::success( 'Done.' );
 	}
@@ -351,7 +319,7 @@ class SettingsMigrator implements InterfaceCommand {
 	/**
 	 * Disables Yoast's XML sitemap.
 	 */
-	private function turn_off_yoast_xml_sitemap() {
+	private static function turn_off_yoast_xml_sitemap() {
 		$option_name = 'wpseo';
 		$option_param = 'enable_xml_sitemap';
 
@@ -369,7 +337,7 @@ class SettingsMigrator implements InterfaceCommand {
 	 * Updates the `blog_public` option to true, which in turn unchecks the `Discourage search engines from indexing this site`
 	 * WP Settings > Reading option.
 	 */
-	private function uncheck_discourage_search_engines() {
+	private static function uncheck_discourage_search_engines() {
 		update_option( 'blog_public', 1 );
 	}
 }

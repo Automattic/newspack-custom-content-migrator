@@ -9,41 +9,10 @@ use \WP_CLI;
 class ContentConverterPluginMigrator implements InterfaceCommand {
 
 	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
-	/**
-	 * @var PostsLogic.
-	 */
-	private $posts_logic;
-
-	/**
-	 * Constructor.
-	 */
-	private function __construct() {
-		$this->posts_logic = new PostsLogic();
-	}
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class;
-		}
-
-		return self::$instance;
-	}
-
-	/**
 	 * See InterfaceCommand::register_commands.
 	 */
-	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator import-blocks-content-from-staging-site', array( $this, 'cmd_import_blocks_content_from_staging_site' ), [
+	public static function register_commands() {
+		WP_CLI::add_command( 'newspack-content-migrator import-blocks-content-from-staging-site', array( __CLASS__, 'cmd_import_blocks_content_from_staging_site' ), [
 			'shortdesc' => "Imports previously backed up Newspack Content Converter plugin's Staging site table contents.",
 			'synopsis'  => [
 				[
@@ -70,7 +39,8 @@ class ContentConverterPluginMigrator implements InterfaceCommand {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_import_blocks_content_from_staging_site( $args, $assoc_args ) {
+	public static function cmd_import_blocks_content_from_staging_site( $args, $assoc_args ) {
+		$posts_logic = new PostsLogic();
 		$table_prefix = isset( $assoc_args[ 'table-prefix' ] ) ? $assoc_args[ 'table-prefix' ] : null;
 		if ( is_null( $table_prefix ) ) {
 			WP_CLI::error( 'Invalid table prefix param.' );
@@ -122,7 +92,7 @@ class ContentConverterPluginMigrator implements InterfaceCommand {
 
 		// Now update hostnames, too.
 		WP_CLI::line( sprintf( 'Updating hostnames in content brought over from Staging from %s to %s ...', $staging_host, $this_host ) );
-		$posts_ids = $this->posts_logic->get_all_posts_ids();
+		$posts_ids = $posts_logic->get_all_posts_ids();
 		foreach ( $posts_ids as $key_posts_ids => $post_id ) {
 			$post                 = get_post( $post_id );
 			$post_content_updated = str_replace( $staging_host, $this_host, $post->post_content );

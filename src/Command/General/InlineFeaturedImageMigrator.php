@@ -7,7 +7,6 @@ use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\Logic\Posts as PostLogic;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
-use WP_Query;
 use Symfony\Component\DomCrawler\Crawler;
 
 /**
@@ -16,71 +15,12 @@ use Symfony\Component\DomCrawler\Crawler;
 class InlineFeaturedImageMigrator implements InterfaceCommand {
 
 	/**
-	 * Instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
-	/**
-	 * PostLogic Instance.
-	 *
-	 * @var $post_logic PostLogic.
-	 */
-	private $post_logic;
-
-	/**
-	 * Logger.
-	 *
-	 * @var Logger $logger Logger instance.
-	 */
-	private $logger;
-	
-	/**
-	 * Crawler.
-	 *
-	 * @var Crawler $crawler Crawler instance.
-	 */
-	private $crawler;
-
-	/**
-	 * AttachmentsLogic Instance.
-	 *
-	 * @var $attachments AttachmentsLogic.
-	 */
-	private $attachments;
-
-	/**
-	 * Constructor.
-	 */
-	private function __construct() {
-		$this->post_logic  = new PostLogic();
-		$this->logger      = new Logger();
-		$this->crawler     = new Crawler();
-		$this->attachments = new AttachmentsLogic();
-	}
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
 	 * See InterfaceCommand::register_commands.
 	 */
-	public function register_commands() {
+	public static function register_commands() {
 		WP_CLI::add_command(
 			'newspack-content-migrator remove-featured-images-from-beginning-of-postcontent',
-			[ $this, 'cmd_remove_featured_images_from_beginning_of_postcontent' ],
+			[ __CLASS__, 'cmd_remove_featured_images_from_beginning_of_postcontent' ],
 			[
 				'shortdesc' => 'Goes through all the Posts, and removes all occurrences of featured image from beginning of Post content.',
 				'synopsis'  => [
@@ -96,7 +36,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator set-first-image-from-content-as-featured-image',
-			[ $this, 'cmd_set_first_image_from_content_as_featured_image' ],
+			[ __CLASS__, 'cmd_set_first_image_from_content_as_featured_image' ],
 			[
 				'shortdesc' => "Runs through all the Posts, and in case it doesn't have a featured image, finds the first <img> element in Post content and sets it as featured image.",
 				'synopsis'  => [
@@ -119,7 +59,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator hide-featured-image-if-used-in-post-content',
-			[ $this, 'cmd_hide_featured_image_if_used_in_post_content' ],
+			[ __CLASS__, 'cmd_hide_featured_image_if_used_in_post_content' ],
 			[
 				'shortdesc' => 'Hides featured image for post if that same image is used in post_content. By default it hides the featured image only if that same image is used at the very beginning of post_content. Optionally, if --anywhere-in-post-content flag is used, it hides the featured image if that same image is used anywhere in post_content.',
 				'synopsis'  => [
@@ -164,7 +104,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator hide-all-featured-images',
-			[ $this, 'cmd_hide_all_featured_images' ],
+			[ __CLASS__, 'cmd_hide_all_featured_images' ],
 			[
 				'shortdesc' => 'Hide ALL featured image.',
 			]
@@ -177,9 +117,11 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 	 * @param array $pos_args   Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 */
-	public function cmd_hide_featured_image_if_used_in_post_content( $pos_args, $assoc_args ) {
+	public static function cmd_hide_featured_image_if_used_in_post_content( $pos_args, $assoc_args ) {
 		global $wpdb;
 		$log = 'hide-featured-image-if-used-in-post-content.log';
+		$post_logic  = new PostLogic();
+		$logger = new Logger();
 
 		$dry_run                  = isset( $assoc_args['dry-run'] ) ? true : false;
 		$anywhere_in_post_content = isset( $assoc_args['anywhere-in-post-content'] ) ? true : false;
@@ -220,11 +162,11 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 		// Use all posts if no post IDs specified.
 		if ( ! $post_ids ) {
 			WP_CLI::line( 'Fetching all published post IDs...' );
-			$post_ids = $this->post_logic->get_all_posts_ids( 'post', [ 'publish' ] );
+			$post_ids = $post_logic->get_all_posts_ids( 'post', [ 'publish' ] );
 		}
 
 		// Timestamp log.
-		$this->logger->log( $log, sprintf( 'Starting %s', date( 'Y-m-d H:I:s' ) ) );
+		$logger->log( $log, sprintf( 'Starting %s', date( 'Y-m-d H:I:s' ) ) );
 
 		// Go through IDs.
 		foreach ( $post_ids as $key_post_id => $post_id ) {
@@ -272,10 +214,10 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				}
 
 				// Check if Featured Image is used anywhere in post_content blocks.
-				$image_blocks = $this->get_image_blocks_from_post_content_blocks( parse_blocks( $post_content ) );
+				$image_blocks = self::get_image_blocks_from_post_content_blocks( parse_blocks( $post_content ) );
 				foreach ( $image_blocks as $image_block ) {
 					if ( $image_block['attrs']['id'] == $thumbnail_id ) {
-						$this->logger->log( $log, sprintf( 'Post ID %d — Featured image used in image block.', $post_id ), $this->logger::SUCCESS );
+						$logger->log( $log, sprintf( 'Post ID %d — Featured image used in image block.', $post_id ), $logger::SUCCESS );
 						$featured_image_used_in_post_content = true;
 
 						break;
@@ -287,7 +229,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 					if ( ! $dry_run ) {
 						update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
 					}
-					$this->logger->log( $log, sprintf( 'Post ID %d -- featured image hidden, image used somewhere in post_content', $post_id ), $this->logger::SUCCESS );
+					$logger->log( $log, sprintf( 'Post ID %d -- featured image hidden, image used somewhere in post_content', $post_id ), $logger::SUCCESS );
 					continue;
 				}           
 			} else {
@@ -369,7 +311,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 					if ( ! $dry_run ) {
 						update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
 					}
-					$this->logger->log( $log, sprintf( 'Post ID %d -- featured image hidden, post_content starts with same image', $post_id ), $this->logger::SUCCESS );
+					$logger->log( $log, sprintf( 'Post ID %d -- featured image hidden, post_content starts with same image', $post_id ), $logger::SUCCESS );
 					continue;
 				}           
 			}
@@ -387,15 +329,17 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 	 * @param array $args       Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 */
-	public function cmd_set_first_image_from_content_as_featured_image( $args, $assoc_args ) {
+	public static function cmd_set_first_image_from_content_as_featured_image( $args, $assoc_args ) {
 		global $wpdb;
+		$post_logic  = new PostLogic();
+		$attachments_logic = new AttachmentsLogic();
 		
 		$post_ids                        = isset( $assoc_args['post-ids-csv'] ) ? explode( ',', $assoc_args['post-ids-csv'] ) : null;
 		$re_set_existing_featured_images = isset( $assoc_args['re-set-even-existing-featured-images'] ) ? true : false;
 
 		// Get all or some posts.
 		if ( ! $post_ids ) {
-			$post_ids = $this->post_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
+			$post_ids = $post_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
 		}
 		if ( empty( $post_ids ) ) {
 			WP_CLI::line( 'No posts without featured image found.' );
@@ -418,7 +362,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 			// Get content for crawling.
 			$post_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM $wpdb->posts WHERE ID = %d", $post_id ) );
 
-			$image_blocks                       = $this->get_image_blocks_from_post_content_blocks( parse_blocks( $post_content ) );
+			$image_blocks                       = self::get_image_blocks_from_post_content_blocks( parse_blocks( $post_content ) );
 			$has_set_featured_image_from_blocks = false;
 
 			if ( ! empty( $image_blocks ) ) {
@@ -448,9 +392,8 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 			// the referenced image in the image block is not actually an uploaded Attachment.
 
 			// Find the first <img>.
-			$this->crawler->clear();
-			$this->crawler->add( $post_content );
-			$img_data  = $this->crawler->filterXpath( '//img' )->extract( [ 'src', 'title', 'alt' ] );
+			$crawler = new Crawler( $post_content );
+			$img_data  = $crawler->filterXpath( '//img' )->extract( [ 'src', 'title', 'alt' ] );
 			$img_src   = $img_data[0][0] ?? null;
 			$img_title = $img_data[0][1] ?? null;
 			$img_alt   = $img_data[0][2] ?? null;
@@ -480,7 +423,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 
 			// Import attachment if it doesn't exist.
 			WP_CLI::line( sprintf( '- importing img `%s`...', $img_src ) );
-			$att_id = $this->attachments->import_external_file( $img_src, $img_title, $img_alt, $description = null, $img_alt, $post_id );
+			$att_id = $attachments_logic->import_external_file( $img_src, $img_title, $img_alt, $description = null, $img_alt, $post_id );
 			if ( is_wp_error( $att_id ) ) {
 				WP_CLI::warning( sprintf( '❗ ERROR importing img `%s` to post ID %s : %s', $img_src, $post_id, $att_id->get_error_message() ) );
 				continue;
@@ -509,10 +452,12 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 	 * @param array $args       Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 */
-	public function cmd_remove_featured_images_from_beginning_of_postcontent( $args, $assoc_args ) {
+	public static function cmd_remove_featured_images_from_beginning_of_postcontent( $args, $assoc_args ) {
+		$post_logic  = new PostLogic();
+		$logger = new Logger();
 		$post_ids = isset( $assoc_args['post-ids-csv'] )
 			? explode( ',', $assoc_args['post-ids-csv'] )
-			: $this->post_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending' ] );
+			: $post_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending' ] );
 
 		global $wpdb;
 		$log_dir = 'logs_de_duped_featured_images';
@@ -594,8 +539,8 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 					// phpcs:ignore
 					$created = mkdir( $log_dir, 0777, true );
 				}
-				$this->logger->log( sprintf( '%s/%d_before.txt', $log_dir, $id ), $content, false );
-				$this->logger->log( sprintf( '%s/%d_after.txt', $log_dir, $id ), $replaced, false );
+				$logger->log( sprintf( '%s/%d_before.txt', $log_dir, $id ), $content, false );
+				$logger->log( sprintf( '%s/%d_after.txt', $log_dir, $id ), $replaced, false );
 			}
 		}
 
@@ -609,11 +554,13 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 	 * @param array $assoc_args      Associative arguments.
 	 * @return void
 	 */
-	public function cmd_hide_all_featured_images( $positional_args, $assoc_args ) {
+	public static function cmd_hide_all_featured_images( $positional_args, $assoc_args ) {
 		
 		$log_file = 'hide_all_featured_images.log';
+		$post_logic  = new PostLogic();
+		$logger = new Logger();
 
-		$this->logger->log( $log_file, 'Starting hide ALL featured images.' );
+		$logger->log( $log_file, 'Starting hide ALL featured images.' );
 
 		// Posts with a featured image.
 		$query_args = [
@@ -631,37 +578,37 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 
 		$counter = 0;
 
-		$this->post_logic->throttled_posts_loop(
+		$post_logic->throttled_posts_loop(
 			$query_args, 
-			function ( $post_id ) use( $log_file, &$counter ) {
+			function ( $post_id ) use( $log_file, $logger, &$counter ) {
 
 				update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
 
-				$this->logger->log( $log_file, sprintf( 'Featured image hidden for the post %d', $post_id ) );
+				$logger->log( $log_file, sprintf( 'Featured image hidden for the post %d', $post_id ) );
 
 				$counter++;
 			}
 		);
 
-		$this->logger->log( $log_file, 'Updated count: ' . $counter );
+		$logger->log( $log_file, 'Updated count: ' . $counter );
 		
 		wp_cache_flush();
 
-		$this->logger->log( $log_file, 'Done', $this->logger::SUCCESS );
+		$logger->log( $log_file, 'Done', $logger::SUCCESS );
 	}
 
 	/**
 	 * Returns an array of all "core/image" blocks from the given
 	 * array of post content blocks.
 	 */
-	private function get_image_blocks_from_post_content_blocks( array $post_content_blocks ): array {
+	private static function get_image_blocks_from_post_content_blocks( array $post_content_blocks ): array {
 		$image_blocks = [];
 
 		foreach ( $post_content_blocks as $block ) {
 			if ( $block['blockName'] === 'core/image' && ! empty( $block['attrs']['id'] ) ) {
 				$image_blocks[] = $block;
 			} elseif ( ! empty( $block['innerBlocks'] ) ) {
-				$image_blocks = array_merge( $image_blocks, $this->get_image_blocks_from_post_content_blocks( $block['innerBlocks'] ) );
+				$image_blocks = array_merge( $image_blocks, self::get_image_blocks_from_post_content_blocks( $block['innerBlocks'] ) );
 			}
 		}
 

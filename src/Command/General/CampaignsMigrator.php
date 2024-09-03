@@ -15,41 +15,10 @@ class CampaignsMigrator implements InterfaceCommand {
 	const CAMPAIGNS_EXPORT_FILE = 'newspack-campaigns.xml';
 
 	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
-	/**
-	 * @var Campaigns
-	 */
-	private $campaigns_logic = null;
-
-	/**
-	 * Constructor.
-	 */
-	private function __construct() {
-		$this->campaigns_logic = new Campaigns();
-	}
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class;
-		}
-
-		return self::$instance;
-	}
-
-	/**
 	 * See InterfaceCommand::register_commands.
 	 */
-	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator export-campaigns', array( $this, 'cmd_export_campaigns' ), [
+	public static function register_commands() {
+		WP_CLI::add_command( 'newspack-content-migrator export-campaigns', array( __CLASS__, 'cmd_export_campaigns' ), [
 			'shortdesc' => 'Exports Newspack Campaigns.',
 			'synopsis'  => [
 				[
@@ -62,7 +31,7 @@ class CampaignsMigrator implements InterfaceCommand {
 			],
 		] );
 
-		WP_CLI::add_command( 'newspack-content-migrator import-campaigns', array( $this, 'cmd_import_campaigns' ), [
+		WP_CLI::add_command( 'newspack-content-migrator import-campaigns', array( __CLASS__, 'cmd_import_campaigns' ), [
 			'shortdesc' => 'Imports Newspack Campaigns.',
 			'synopsis'  => [
 				[
@@ -82,7 +51,7 @@ class CampaignsMigrator implements InterfaceCommand {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_export_campaigns( $args, $assoc_args ) {
+	public static function cmd_export_campaigns( $args, $assoc_args ) {
 		$output_dir = isset( $assoc_args[ 'output-dir' ] ) ? $assoc_args[ 'output-dir' ] : null;
 		if ( is_null( $output_dir ) || ! is_dir( $output_dir ) ) {
 			WP_CLI::error( 'Invalid output dir.' );
@@ -90,7 +59,7 @@ class CampaignsMigrator implements InterfaceCommand {
 
 		WP_CLI::line( sprintf( 'Exporting Newspack Campaigns...' ) );
 
-		$result = $this->export_campaigns( $output_dir, self::CAMPAIGNS_EXPORT_FILE );
+		$result = self::export_campaigns( $output_dir, self::CAMPAIGNS_EXPORT_FILE );
 		if ( true === $result ) {
 			WP_CLI::success( 'Done.' );
 			exit(0);
@@ -108,10 +77,10 @@ class CampaignsMigrator implements InterfaceCommand {
 	 *
 	 * @return bool Success.
 	 */
-	public function export_campaigns( $output_dir, $file_output_campaigns ) {
+	public static function export_campaigns( $output_dir, $file_output_campaigns ) {
 		wp_cache_flush();
 
-		$posts = $this->campaigns_logic->get_all_campaigns();
+		$posts = Campaigns::get_all_campaigns();
 		if ( empty( $posts ) ) {
 			WP_CLI::warning( sprintf( 'No Campaigns found.' ) );
 			return false;
@@ -122,7 +91,7 @@ class CampaignsMigrator implements InterfaceCommand {
 			$post_ids[] = $post->ID;
 		}
 
-		return PostsMigrator::get_instance()->migrator_export_posts( $post_ids, $output_dir, $file_output_campaigns );
+		return PostsMigrator::migrator_export_posts( $post_ids, $output_dir, $file_output_campaigns );
 	}
 
 	/**
@@ -131,7 +100,7 @@ class CampaignsMigrator implements InterfaceCommand {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_import_campaigns( $args, $assoc_args ) {
+	public static function cmd_import_campaigns( $args, $assoc_args ) {
 		$input_dir = isset( $assoc_args[ 'input-dir' ] ) ? $assoc_args[ 'input-dir' ] : null;
 		if ( is_null( $input_dir ) || ! is_dir( $input_dir ) ) {
 			WP_CLI::error( 'Invalid input dir.' );
@@ -145,7 +114,7 @@ class CampaignsMigrator implements InterfaceCommand {
 
 		WP_CLI::line( 'Importing Newspack Campaigns from ' . $import_file . ' ...' );
 
-		$this->import_campaigns( $import_file );
+		self::import_campaigns( $import_file );
 
 		WP_CLI::success( 'Done.' );
 	}
@@ -155,22 +124,22 @@ class CampaignsMigrator implements InterfaceCommand {
 	 *
 	 * @param string $import_file XML file to import.
 	 */
-	private function import_campaigns( $import_file ) {
+	private static function import_campaigns( $import_file ) {
 		wp_cache_flush();
 
-		$this->delete_all_existing_campaigns();
+		self::delete_all_existing_campaigns();
 
 		// Newspack Blocks registers the \Newspack_Popups::popup_default_fields callback on 'save_post_newspack_popups_cpt' action
 		// which needs to be removed, or otherwise it will add the default meta_fields to the Campaigns, and the inserted entries
 		// will get double metas -- the default ones from the action, and the exported/imported ones from the file.
 		remove_action( 'save_post_newspack_popups_cpt', [ \Newspack_Popups::class, 'popup_default_fields' ], 10 );
 
-		register_post_type( $this->campaigns_logic::CAMPAIGNS_POST_TYPE );
+		register_post_type( Campaigns::CAMPAIGNS_POST_TYPE );
 
 		// The reason why we're not running the `wp import` command, but instead are programmatically importing the file like
 		// this, is that we need to remove the action above; if we ran a separate `wp import` command, we couldn't tap into its
 		// action stack (since it starts a separate one, in a separate PHP execution run).
-		$this->include_wp_importer_dependencies();
+		self::include_wp_importer_dependencies();
 		$importer = new \WP_Import();
 		$importer->import( $import_file );
 	}
@@ -178,7 +147,7 @@ class CampaignsMigrator implements InterfaceCommand {
 	/**
 	 * Includes WP Importer dependencies to enable programmatic execution.
 	 */
-	private function include_wp_importer_dependencies() {
+	private static function include_wp_importer_dependencies() {
 		require_once( ABSPATH . 'wp-admin/includes/class-wp-importer.php' );
 
 		// For the following several classes, consider the different install structure on Atomic.
@@ -206,10 +175,10 @@ class CampaignsMigrator implements InterfaceCommand {
 	/**
 	 * Deletes all existing Campaigns.
 	 */
-	private function delete_all_existing_campaigns() {
+	private static function delete_all_existing_campaigns() {
 		wp_cache_flush();
 
-		$posts = $this->campaigns_logic->get_all_campaigns();
+		$posts = Campaigns::get_all_campaigns();
 		if ( empty( $posts ) ) {
 			return;
 		}

@@ -24,36 +24,11 @@ class ListingsMigrator implements InterfaceCommand {
 	];
 
 	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
-	/**
-	 * Constructor.
-	 */
-	private function __construct() {
-	}
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class;
-		}
-
-		return self::$instance;
-	}
-
-	/**
 	 * See InterfaceCommand::register_commands.
 	 */
-	public function register_commands() {
+	public static function register_commands() {
 		WP_CLI::add_command( 'newspack-content-migrator export-listings',
-			[ $this, 'cmd_export_listings' ],
+			[ __CLASS__, 'cmd_export_listings' ],
 			[
 				'shortdesc' => 'Exports Listings.',
 				'synopsis'  => [
@@ -69,7 +44,7 @@ class ListingsMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command( 'newspack-content-migrator import-listings',
-			[ $this, 'cmd_import_listings' ],
+			[ __CLASS__, 'cmd_import_listings' ],
 			[
 				'shortdesc' => 'Imports Listings.',
 				'synopsis'  => [
@@ -91,7 +66,7 @@ class ListingsMigrator implements InterfaceCommand {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_export_listings( $args, $assoc_args ) {
+	public static function cmd_export_listings( $args, $assoc_args ) {
 		$output_dir = isset( $assoc_args[ 'output-dir' ] ) ? $assoc_args[ 'output-dir' ] : null;
 		if ( is_null( $output_dir ) || ! is_dir( $output_dir ) ) {
 			WP_CLI::error( 'Invalid output dir.' );
@@ -99,7 +74,7 @@ class ListingsMigrator implements InterfaceCommand {
 
 		WP_CLI::line( sprintf( 'Exporting Listings post types...' ) );
 
-		$result = $this->export_listings( $output_dir, self::LISTINGS_EXPORT_FILE );
+		$result = self::export_listings( $output_dir, self::LISTINGS_EXPORT_FILE );
 		if ( true === $result ) {
 			WP_CLI::success( 'Done.' );
 			exit(0);
@@ -117,7 +92,7 @@ class ListingsMigrator implements InterfaceCommand {
 	 *
 	 * @return bool Success.
 	 */
-	public function export_listings( $output_dir, $file_output_listings ) {
+	public static function export_listings( $output_dir, $file_output_listings ) {
 		wp_cache_flush();
 
 		$posts = get_posts( [
@@ -135,7 +110,7 @@ class ListingsMigrator implements InterfaceCommand {
 			$post_ids[] = $post->ID;
 		}
 
-		return PostsMigrator::get_instance()->migrator_export_posts( $post_ids, $output_dir, $file_output_listings );
+		return PostsMigrator::migrator_export_posts( $post_ids, $output_dir, $file_output_listings );
 	}
 
 	/**
@@ -144,7 +119,7 @@ class ListingsMigrator implements InterfaceCommand {
 	 * @param string $args
 	 * @param string $assoc_args
 	 */
-	public function cmd_import_listings( $args, $assoc_args ) {
+	public static function cmd_import_listings( $args, $assoc_args ) {
 		$input_dir = isset( $assoc_args[ 'input-dir' ] ) ? $assoc_args[ 'input-dir' ] : null;
 		if ( is_null( $input_dir ) || ! is_dir( $input_dir ) ) {
 			WP_CLI::error( 'Invalid input dir.' );
@@ -158,8 +133,8 @@ class ListingsMigrator implements InterfaceCommand {
 
 		WP_CLI::line( 'Importing Listings from ' . $import_file . ' ...' );
 
-		$this->delete_all_existing_listings();
-		PostsMigrator::get_instance()->import_posts( $import_file );
+		self::delete_all_existing_listings();
+		PostsMigrator::import_posts( $import_file );
 
 		wp_cache_flush();
 
@@ -169,7 +144,7 @@ class ListingsMigrator implements InterfaceCommand {
 	/**
 	 * Deletes all existing Listings post types.
 	 */
-	private function delete_all_existing_listings() {
+	private static function delete_all_existing_listings() {
 		wp_cache_flush();
 
 		$query = new \WP_Query( [

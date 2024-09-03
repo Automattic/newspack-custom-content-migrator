@@ -13,36 +13,12 @@ class ReaderRevenueMigrator implements InterfaceCommand {
 	 */
 	const READER_REVENUE_PRODUCTS_EXPORT_FILE = 'newspack-reader-revenue-products.xml';
 
-	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
-	/**
-	 * Constructor.
-	 */
-	private function __construct() {
-	}
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class;
-		}
-
-		return self::$instance;
-	}
 
 	/**
 	 * See InterfaceCommand::register_commands.
 	 */
-	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator export-reader-revenue', array( $this, 'cmd_export_reader_revenue' ), [
+	public static function register_commands() {
+		WP_CLI::add_command( 'newspack-content-migrator export-reader-revenue', array( __CLASS__, 'cmd_export_reader_revenue' ), [
 			'shortdesc' => 'Exports Reader Revenue `product` post types.',
 			'synopsis'  => [
 				[
@@ -55,7 +31,7 @@ class ReaderRevenueMigrator implements InterfaceCommand {
 			],
 		] );
 
-		WP_CLI::add_command( 'newspack-content-migrator import-reader-revenue', array( $this, 'cmd_import_reader_revenue' ), [
+		WP_CLI::add_command( 'newspack-content-migrator import-reader-revenue', array( __CLASS__, 'cmd_import_reader_revenue' ), [
 			'shortdesc' => 'Imports Reader Revenue `product` post types.',
 			'synopsis'  => [
 				[
@@ -83,7 +59,7 @@ class ReaderRevenueMigrator implements InterfaceCommand {
 
 		WP_CLI::line( sprintf( 'Exporting Reader Revenue `product` post types...' ) );
 
-		$result = $this->export_reader_revenue( $output_dir, self::READER_REVENUE_PRODUCTS_EXPORT_FILE );
+		$result = self::export_reader_revenue( $output_dir, self::READER_REVENUE_PRODUCTS_EXPORT_FILE );
 		if ( true === $result ) {
 			WP_CLI::success( 'Done.' );
 			exit(0);
@@ -101,7 +77,7 @@ class ReaderRevenueMigrator implements InterfaceCommand {
 	 *
 	 * @return bool Success.
 	 */
-	public function export_reader_revenue( $output_dir, $file_output_reader_revenue_products ) {
+	public static function export_reader_revenue( $output_dir, $file_output_reader_revenue_products ) {
 		wp_cache_flush();
 
 		$posts = get_posts( [
@@ -119,7 +95,7 @@ class ReaderRevenueMigrator implements InterfaceCommand {
 			$post_ids[] = $post->ID;
 		}
 
-		return PostsMigrator::get_instance()->migrator_export_posts( $post_ids, $output_dir, $file_output_reader_revenue_products );
+		return PostsMigrator::migrator_export_posts( $post_ids, $output_dir, $file_output_reader_revenue_products );
 	}
 
 	/**
@@ -128,7 +104,7 @@ class ReaderRevenueMigrator implements InterfaceCommand {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_import_reader_revenue( $args, $assoc_args ) {
+	public static function cmd_import_reader_revenue( $args, $assoc_args ) {
 		$input_dir = isset( $assoc_args[ 'input-dir' ] ) ? $assoc_args[ 'input-dir' ] : null;
 		if ( is_null( $input_dir ) || ! is_dir( $input_dir ) ) {
 			WP_CLI::error( 'Invalid input dir.' );
@@ -142,15 +118,15 @@ class ReaderRevenueMigrator implements InterfaceCommand {
 
 		WP_CLI::line( 'Importing Reader Revenue Products from ' . $import_file . ' ...' );
 
-		$this->delete_all_existing_products();
-		PostsMigrator::get_instance()->import_posts( $import_file );
+		self::delete_all_existing_products();
+		PostsMigrator::import_posts( $import_file );
 
 		$product_id_old = get_option( 'newspack_donation_product_id' );
 		if ( false === $product_id_old ) {
 			WP_CLI::error( 'newspack_donation_product_id `option_name` not found.' );
 			return false;
 		}
-		$product_id_new = PostsMigrator::get_instance()->get_current_post_id_from_original_post_id( $product_id_old );
+		$product_id_new = PostsMigrator::get_current_post_id_from_original_post_id( $product_id_old );
 		update_option( 'newspack_donation_product_id', $product_id_new );
 
 		wp_cache_flush();
@@ -161,7 +137,7 @@ class ReaderRevenueMigrator implements InterfaceCommand {
 	/**
 	 * Deletes all existing `product` post types.
 	 */
-	private function delete_all_existing_products() {
+	private static function delete_all_existing_products() {
 		wp_cache_flush();
 
 		$args = array(

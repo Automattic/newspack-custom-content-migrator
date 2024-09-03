@@ -17,35 +17,10 @@ class MenusMigrator implements InterfaceCommand {
 	const MENU_EXPORT_FILE = 'newspack-menu-export.json';
 
 	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
-	/**
-	 * Constructor.
-	 */
-	private function __construct() {
-	}
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class;
-		}
-
-		return self::$instance;
-	}
-
-	/**
 	 * See InterfaceCommand::register_commands.
 	 */
-	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator export-menus', array( $this, 'cmd_export_menus' ), [
+	public static function register_commands() {
+		WP_CLI::add_command( 'newspack-content-migrator export-menus', array( __CLASS__, 'cmd_export_menus' ), [
 			'shortdesc' => 'Exports menu elements of the staging site and associated pages when needed.',
 			'synopsis'  => [
 				[
@@ -58,7 +33,7 @@ class MenusMigrator implements InterfaceCommand {
 			],
 		] );
 
-		WP_CLI::add_command( 'newspack-content-migrator import-menus', array( $this, 'cmd_import_menus' ), [
+		WP_CLI::add_command( 'newspack-content-migrator import-menus', array( __CLASS__, 'cmd_import_menus' ), [
 			'shortdesc' => 'Imports custom menus and new pages from the export JSON file.',
 			'synopsis'  => [
 				[
@@ -86,7 +61,7 @@ class MenusMigrator implements InterfaceCommand {
 
 		WP_CLI::line( sprintf( 'Exporting menus...' ) );
 
-		$this->export_menus( $export_dir );
+		self::export_menus( $export_dir );
 
 		WP_CLI::success( 'Done.' );
 	}
@@ -149,7 +124,7 @@ class MenusMigrator implements InterfaceCommand {
 	 * @param array $args
 	 * @param array $assoc_args
 	 */
-	public function cmd_import_menus( $args, $assoc_args ) {
+	public static function cmd_import_menus( $args, $assoc_args ) {
 		$directory = isset( $assoc_args['input-dir'] ) ? $assoc_args['input-dir'] : null;
 
 		$directory = rtrim( $directory, '/' );
@@ -161,8 +136,8 @@ class MenusMigrator implements InterfaceCommand {
 
 		WP_CLI::line( sprintf( 'Importing menus from ' . $menu_file . '...' ) );
 
-		$this->delete_all_menus();
-		$this->import_menus( $menu_file ) ;
+		self::delete_all_menus();
+		self::import_menus( $menu_file ) ;
 		wp_cache_flush();
 
 		WP_CLI::success( 'Done.' );
@@ -171,7 +146,7 @@ class MenusMigrator implements InterfaceCommand {
 	/**
 	 * Deletes all existing menus.
 	 */
-	private function delete_all_menus() {
+	private static function delete_all_menus() {
 		$menus = wp_get_nav_menus();
 		if ( empty( $menus ) ) {
 			return;
@@ -187,7 +162,7 @@ class MenusMigrator implements InterfaceCommand {
 	 *
 	 * @param string $menu_file Full path to menu json file.
 	 */
-	private function import_menus( $menu_file ) {
+	private static function import_menus( $menu_file ) {
 		global $wpdb;
 
 		$menu_read = file_get_contents( $menu_file );

@@ -25,43 +25,6 @@ class PostsMigrator implements InterfaceCommand {
 	const SHORTCODES_LOGS = 'posts_shorcodes_migrator.log';
 
 	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
-	/**
-	 * @var Posts.
-	 */
-	private $posts_logic = null;
-
-	/**
-	 * @var Logger.
-	 */
-	private $logger;
-
-	/**
-	 * Constructor.
-	 */
-	private function __construct() {
-		$this->posts_logic = new Posts();
-		$this->logger      = new Logger();
-	}
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
 	 * See InterfaceCommand::register_commands.
 	 */
 	public static function register_commands() {
@@ -295,7 +258,7 @@ class PostsMigrator implements InterfaceCommand {
 	 * @param array $args
 	 * @param array $assoc_args
 	 */
-	public function cmd_export_posts( $args, $assoc_args ) {
+	public static function cmd_export_posts( $args, $assoc_args ) {
 		$output_dir   = isset( $assoc_args['output-dir'] ) ? $assoc_args['output-dir'] : null;
 		$output_file  = isset( $assoc_args['output-xml-file'] ) ? $assoc_args['output-xml-file'] : null;
 		$post_ids_csv = isset( $assoc_args['post-ids'] ) ? $assoc_args['post-ids'] : null;
@@ -313,7 +276,7 @@ class PostsMigrator implements InterfaceCommand {
 
 		WP_CLI::line( sprintf( 'Exporting post IDs %s to %s...', implode( ',', $post_ids ), $output_dir . '/' . $output_file ) );
 
-		$this->migrator_export_posts( $post_ids, $output_dir, $output_file );
+		self::migrator_export_posts( $post_ids, $output_dir, $output_file );
 
 		WP_CLI::success( 'Done.' );
 	}
@@ -327,7 +290,7 @@ class PostsMigrator implements InterfaceCommand {
 	 *
 	 * @return bool
 	 */
-	public function migrator_export_posts( $post_ids, $output_dir, $output_file ) {
+	public static function migrator_export_posts( $post_ids, $output_dir, $output_file ) {
 		if ( empty( $post_ids ) ) {
 			WP_CLI::warning( 'No posts to export.' );
 			return false;
@@ -340,7 +303,7 @@ class PostsMigrator implements InterfaceCommand {
 
 		wp_cache_flush();
 		$post_ids = array_values( $post_ids );
-		$this->export_posts( $post_ids, $output_dir, $output_file );
+		self::export_posts( $post_ids, $output_dir, $output_file );
 
 		return true;
 	}
@@ -354,7 +317,7 @@ class PostsMigrator implements InterfaceCommand {
 	 * @param string $output_dir  Output dir.
 	 * @param string $output_file Output file.
 	 */
-	private function export_posts( $post_ids, $output_dir, $output_file ) {
+	private static function export_posts( $post_ids, $output_dir, $output_file ) {
 		$post_ids_csv = implode( ',', $post_ids );
 		WP_CLI::runcommand( "export --post__in=$post_ids_csv --dir=$output_dir --filename_format=$output_file --with_attachments" );
 	}
@@ -365,7 +328,7 @@ class PostsMigrator implements InterfaceCommand {
 	 * @param array $args
 	 * @param array $assoc_args
 	 */
-	public function cmd_import_posts( $args, $assoc_args ) {
+	public static function cmd_import_posts( $args, $assoc_args ) {
 		$file = isset( $assoc_args['file'] ) ? $assoc_args['file'] : null;
 		if ( is_null( $file ) || ! file_exists( $file ) ) {
 			WP_CLI::error( 'Invalid file provided.' );
@@ -373,7 +336,7 @@ class PostsMigrator implements InterfaceCommand {
 
 		WP_CLI::line( 'Importing posts...' );
 
-		$this->import_posts( $file );
+		self::import_posts( $file );
 		wp_cache_flush();
 
 		WP_CLI::success( 'Done.' );
@@ -384,7 +347,7 @@ class PostsMigrator implements InterfaceCommand {
 	 *
 	 * @return mixed
 	 */
-	public function import_posts( $file ) {
+	public static function import_posts( $file ) {
 		$options = array(
 			'return' => true,
 		);
@@ -399,17 +362,18 @@ class PostsMigrator implements InterfaceCommand {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_export_all_staging_site_pages( $args, $assoc_args ) {
+	public static function cmd_export_all_staging_site_pages( $args, $assoc_args ) {
 		$output_dir = isset( $assoc_args['output-dir'] ) ? $assoc_args['output-dir'] : null;
 		if ( is_null( $output_dir ) ) {
 			WP_CLI::error( 'Invalid output dir.' );
 		}
+		$posts_logic = new Posts();
 
 		WP_CLI::line( sprintf( 'Exporting all Staging site Pages to %s ...', $output_dir . '/' . self::STAGING_PAGES_EXPORT_FILE ) );
 
 		wp_reset_postdata();
-		$post_ids = $this->posts_logic->get_all_posts_ids( 'page' );
-		$this->migrator_export_posts( $post_ids, $output_dir, self::STAGING_PAGES_EXPORT_FILE );
+		$post_ids = $posts_logic->get_all_posts_ids( 'page' );
+		self::migrator_export_posts( $post_ids, $output_dir, self::STAGING_PAGES_EXPORT_FILE );
 
 		WP_CLI::success( 'Done.' );
 	}
@@ -419,7 +383,7 @@ class PostsMigrator implements InterfaceCommand {
 	 *
 	 * @param array $page_ids IDs of pages.
 	 */
-	public function preserve_unique_pages_from_live_as_drafts( $page_ids ) {
+	public static function preserve_unique_pages_from_live_as_drafts( $page_ids ) {
 		foreach ( $page_ids as $id ) {
 			$page              = get_post( $id );
 			$page->post_title  = '[Live] ' . $page->post_title;
@@ -435,11 +399,13 @@ class PostsMigrator implements InterfaceCommand {
 	 * @param array $args
 	 * @param array $assoc_args
 	 */
-	public function cmd_import_staging_site_pages( $args, $assoc_args ) {
+	public static function cmd_import_staging_site_pages( $args, $assoc_args ) {
 		$input_dir = isset( $assoc_args['input-dir'] ) ? $assoc_args['input-dir'] : null;
 		if ( is_null( $input_dir ) || ! file_exists( $input_dir ) ) {
 			WP_CLI::error( 'Invalid input dir.' );
 		}
+
+		$posts_logic = new Posts();
 
 		// The following Page migration strategy aims to achieve two things:
 		// - to keep all the Pages from the Staging site,
@@ -449,15 +415,15 @@ class PostsMigrator implements InterfaceCommand {
 
 		// First delete those Live Pages which we're not keeping.
 		WP_CLI::line( 'First clearing all Live site Pages which will be imported from Staging site to prevent duplicates...' );
-		$this->delete_duplicate_live_site_pages();
+		self::delete_duplicate_live_site_pages();
 
 		// Get IDs of the unique Live Pages which we are keeping.
 		wp_reset_postdata();
-		$pages_live_ids = $this->posts_logic->get_all_posts_ids( 'page' );
+		$pages_live_ids = $posts_logic->get_all_posts_ids( 'page' );
 
 		// Update the remaining Live Pages which we are keeping: save them as drafts, and change their permalinks and titles.
 		if ( count( $pages_live_ids ) > 0 ) {
-			$this->preserve_unique_pages_from_live_as_drafts( $pages_live_ids );
+			self::preserve_unique_pages_from_live_as_drafts( $pages_live_ids );
 			wp_cache_flush();
 		} else {
 			WP_CLI::warning( 'No unique Live site Pages found, continuing.' );
@@ -466,7 +432,7 @@ class PostsMigrator implements InterfaceCommand {
 		// Import Pages from Staging site.
 		$file = $input_dir . '/' . self::STAGING_PAGES_EXPORT_FILE;
 		WP_CLI::line( 'Importing Staging site Pages from  ' . $file . ' (uses `wp import` and might take a bit longer) ...' );
-		$this->import_posts( $file );
+		self::import_posts( $file );
 
 		wp_cache_flush();
 
@@ -476,8 +442,8 @@ class PostsMigrator implements InterfaceCommand {
 	/**
 	 * Deletes all Live site Pages which will not be preserved, since they'll be imported from the Staging site anyway.
 	 */
-	public function delete_duplicate_live_site_pages() {
-		$post_ids = $this->get_all_pages_duplicates_on_staging();
+	public static function delete_duplicate_live_site_pages() {
+		$post_ids = self::get_all_pages_duplicates_on_staging();
 		if ( empty( $post_ids ) ) {
 			WP_CLI::success( 'No Pages found.' );
 			return;
@@ -499,7 +465,7 @@ class PostsMigrator implements InterfaceCommand {
 	 *
 	 * @return array|void Array of page IDs.
 	 */
-	public function get_all_pages_duplicates_on_staging() {
+	public static function get_all_pages_duplicates_on_staging() {
 		global $wpdb;
 
 		$ids = array();
@@ -533,7 +499,7 @@ class PostsMigrator implements InterfaceCommand {
 	 * @param array $args
 	 * @param array $assoc_args
 	 */
-	public function cmd_delete_export_postmeta() {
+	public static function cmd_delete_export_postmeta() {
 		WP_CLI::line( sprintf( 'Deleting %s postmeta from all ther posts and pages...', self::META_KEY_ORIGINAL_ID ) );
 
 		$args  = array(
@@ -563,7 +529,7 @@ class PostsMigrator implements InterfaceCommand {
 	 *
 	 * @return |null
 	 */
-	public function get_current_post_id_from_original_post_id( $original_post_id ) {
+	public static function get_current_post_id_from_original_post_id( $original_post_id ) {
 		global $wpdb;
 
 		$new_id = $wpdb->get_var(
@@ -588,13 +554,14 @@ class PostsMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 * @return void
 	 */
-	public function cmd_find_posts_by_number_of_revisions( $args, $assoc_args ) {
+	public static function cmd_find_posts_by_number_of_revisions( $args, $assoc_args ) {
+		$posts_logic = new Posts();
 		$number = intval( $args[0] );
 		if ( ! $number ) {
 			WP_CLI::error( 'Invalid argument for Number of revisions. Integer expected.' );
 		}
 		$format  = WP_CLI\Utils\get_flag_value( $assoc_args, 'format', 'table' );
-		$results = $this->posts_logic->get_posts_by_number_of_revisions( $number );
+		$results = $posts_logic->get_posts_by_number_of_revisions( $number );
 		WP_CLI\Utils\format_items( $format, $results, [ 'post_ID', 'num_of_revisions' ] );
 	}
 
@@ -606,7 +573,7 @@ class PostsMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 * @return void
 	 */
-	public function cmd_clear_post_revisions( $positional_args, $assoc_args ) {
+	public static function cmd_clear_post_revisions( $positional_args, $assoc_args ) {
 		$post_id = intval( $assoc_args['post-id'] );
 		$number  = intval( $assoc_args['keep'] );
 		if ( ! $number || ! $post_id ) {
@@ -622,8 +589,9 @@ class PostsMigrator implements InterfaceCommand {
 		}
 		$slepp_micro = $sleep * 1000;
 		$dry_run     = isset( $assoc_args['dry-run'] );
+		$posts_logic = new Posts();
 
-		$current_revisions = $this->posts_logic->get_post_number_of_revisions( $post_id );
+		$current_revisions = $posts_logic->get_post_number_of_revisions( $post_id );
 
 		if ( $dry_run ) {
 			WP_CLI::log( "Post $post_id currently has $current_revisions revisions" );
@@ -640,7 +608,7 @@ class PostsMigrator implements InterfaceCommand {
 		while ( $current_revisions > $number ) {
 			$chunk = min( $chunk_size, $current_revisions - $number );
 			WP_CLI::debug( "Preparing to delete $chunk revisions" );
-			$deleted = $this->posts_logic->delete_post_revisions( $post_id, $chunk );
+			$deleted = $posts_logic->delete_post_revisions( $post_id, $chunk );
 			if ( $deleted !== $chunk ) {
 				WP_CLI::error( "An error has occurred when trying to delete $chunk revisions", false );
 				if ( false === $deleted ) {
@@ -651,7 +619,7 @@ class PostsMigrator implements InterfaceCommand {
 			}
 			$total_deleted += $deleted;
 			WP_CLI::log( "Deleted $chunk revisions" );
-			$current_revisions = $this->posts_logic->get_post_number_of_revisions( $post_id );
+			$current_revisions = $posts_logic->get_post_number_of_revisions( $post_id );
 			WP_CLI::log( "Post $post_id currently has $current_revisions revisions" );
 			if ( $sleep > 0 ) {
 				WP_CLI::debug( "Sleeping for $sleep miliseconds" );
@@ -669,7 +637,7 @@ class PostsMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 * @return void
 	 */
-	public function cmd_clear_revisions( $positional_args, $assoc_args ) {
+	public static function cmd_clear_revisions( $positional_args, $assoc_args ) {
 		$number = intval( $assoc_args['keep'] );
 		if ( ! $number ) {
 			WP_CLI::error( 'Invalid argument for Number of revisions. Integer expected.' );
@@ -680,7 +648,7 @@ class PostsMigrator implements InterfaceCommand {
 			WP_CLI::log( '' );
 			WP_CLI::log( "Processing post {$post->post_ID}" );
 			$assoc_args['post-id'] = $post->post_ID;
-			$this->cmd_clear_post_revisions( $positional_args, $assoc_args );
+			self::cmd_clear_post_revisions( $positional_args, $assoc_args );
 		}
 	}
 
@@ -691,19 +659,20 @@ class PostsMigrator implements InterfaceCommand {
 	 * @param array $assoc_args      Associative arguments.
 	 * @return void
 	 */
-	public function cmd_fix_dupe_slugs( $positional_args, $assoc_args ) {
+	public static function cmd_fix_dupe_slugs( $positional_args, $assoc_args ) {
 		$log_file = 'fixed_dupe_slugs.log';
+		$posts_logic = new Posts();
+		$logger = new Logger();
 
 		WP_CLI::log( 'Fixing duplicate slugs for posts and pages...' );
-		$updated = $this->posts_logic->fix_duplicate_slugs( [ 'post', 'page' ] );
+		$updated = $posts_logic->fix_duplicate_slugs( [ 'post', 'page' ] );
 
 		if ( ! empty( $updated ) ) {
 			// Save to log.
 			foreach ( $updated as $update ) {
-				$this->logger->log(
+				$logger->log(
 					$log_file,
-					json_encode( $update ),
-					$to_cli = false
+					json_encode( $update )
 				);
 			}
 
@@ -720,8 +689,9 @@ class PostsMigrator implements InterfaceCommand {
 	 * @param array $assoc_args      Associative arguments.
 	 * @return void
 	 */
-	public function cmd_hide_featured_images( $positional_args, $assoc_args ) {
+	public static function cmd_hide_featured_images( $positional_args, $assoc_args ) {
 		$log_file = 'hide_featured_images.log';
+		$logger = new Logger();
 
 		$posts_per_batch = isset( $assoc_args['posts-per-batch'] ) ? intval( $assoc_args['posts-per-batch'] ) : 10000;
 		$batch           = isset( $assoc_args['batch'] ) ? intval( $assoc_args['batch'] ) : 1;
@@ -783,23 +753,13 @@ class PostsMigrator implements InterfaceCommand {
 		foreach ( $posts as $post_id ) {
 			update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
 			update_post_meta( $post_id, '_newspack_featured_image_is_hidden', true );
-			$this->logger->log(
+			$logger->log(
 				$log_file,
 				sprintf( 'Featured image hidden for the post %d', $post_id ),
-				true
 			);
 		}
 
 		wp_cache_flush();
 	}
 
-	/**
-	 * Generate Newspack Iframe Block code from URL.
-	 *
-	 * @param string $src Iframe source URL.
-	 * @return string Iframe block code to be add to the post content.
-	 */
-	public function embed_iframe_block_from_src( $src ) {
-		return '<!-- wp:newspack-blocks/iframe {"src":"' . $src . '"} /-->';
-	}
 }
