@@ -56,20 +56,42 @@ class PluginSetup {
 	}
 
 	/**
+	 * Registers command classes.
+	 *
+	 * @param array $classes Array of classes implementing the RegisterCommandInterface.
+	 */
+	public static function register_command_classes( array $classes ): void {
+
+		// Get the commands from implementers of the newspack_migration_tools_command_classes hook.
+		foreach ( WpCliCommands::get_classes_with_cli_commands() as $command_class ) {
+			if ( is_a( $command_class, WpCliCommandInterface::class, true ) ) {
+				array_map( function ( $command ) {
+					WP_CLI::add_command( ...$command );
+				}, $command_class::get_cli_commands() );
+			}
+		}
+
+		try {
+			// Register the commands from the passed classes array.
+			foreach ( $classes as $command_class ) {
+				if ( is_a( $command_class, Command\RegisterCommandInterface::class, true ) ) {
+					$command_class::register_commands();
+				}
+			}
+		} catch ( \Exception $o_0 ) {
+			WP_CLI::error( sprintf('Error registering command for class %s. Message: %s', $command_class, $o_0->getMessage() ));
+		}
+
+	}
+
+	/**
 	 * Registers migrators' commands.
+	 *
+	 * @deprecated Use register_command_classes instead (and refactor the class passed to it).
 	 *
 	 * @param array $migrator_classes Array of Command\InterfaceCommand classes.
 	 */
 	public static function register_migrators( $migrator_classes ) {
-
-		foreach ( WpCliCommands::get_classes_with_cli_commands() as $command_class ) {
-			$class = $command_class::get_instance();
-			if ( is_a( $class, WpCliCommandInterface::class ) ) {
-				array_map( function ( $command ) {
-					WP_CLI::add_command( ...$command );
-				}, $class->get_cli_commands() );
-			}
-		}
 
 		foreach ( $migrator_classes as $migrator_class ) {
 			$migrator = $migrator_class::get_instance();

@@ -23,13 +23,19 @@ require_once ABSPATH . 'wp-settings.php';
 PluginSetup::configure_error_reporting();
 PluginSetup::register_ticker();
 PluginSetup::add_hooks();
+
+PluginSetup::register_command_classes(
+	[
+		Command\General\CssMigrator::class,
+		Command\General\PostsMigrator::class,
+	]
+);
+
 PluginSetup::register_migrators(
 	array(
 		// General.
-		Command\General\PostsMigrator::class,
 		Command\General\MetaToContentMigrator::class,
 		Command\General\MenusMigrator::class,
-		Command\General\CssMigrator::class,
 		Command\General\ContentConverterPluginMigrator::class,
 		Command\General\SettingsMigrator::class,
 		Command\General\WooCommMigrator::class,

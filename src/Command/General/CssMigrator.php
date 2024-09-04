@@ -2,11 +2,13 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Command\General\PostsMigrator;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \WP_CLI;
 
-class CssMigrator implements InterfaceCommand {
+class CssMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * @var string Current theme's export file name.
@@ -14,35 +16,12 @@ class CssMigrator implements InterfaceCommand {
 	const CSS_CURRENT_THEME_EXPORT_FILE = 'newspack-custom-css-current-theme.xml';
 
 	/**
-	 * @var null|InterfaceCommand Instance.
+	 * {@inheritDoc}
 	 */
-	private static $instance = null;
-
-	/**
-	 * Constructor.
-	 */
-	private function __construct() {
-	}
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class;
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator export-current-theme-custom-css', array( $this, 'cmd_export_current_theme_custom_css' ), [
+	public static function register_commands(): void {
+		WP_CLI::add_command( 'newspack-content-migrator export-current-theme-custom-css',
+			self::get_command_closure( 'cmd_export_current_theme_custom_css' ),
+			[
 			'shortdesc' => 'Exports custom CSS for current active Theme. Exits with code 0 on success or 1 otherwise.',
 			'synopsis'  => [
 				[
@@ -55,7 +34,9 @@ class CssMigrator implements InterfaceCommand {
 			],
 		] );
 
-		WP_CLI::add_command( 'newspack-content-migrator import-custom-css-file', array( $this, 'cmd_import_custom_css_file' ), [
+		WP_CLI::add_command( 'newspack-content-migrator import-custom-css-file',
+			self::get_command_closure( 'cmd_import_custom_css_file' ),
+		[
 			'shortdesc' => 'Imports custom CSS which was exported from the Staging site.',
 			'synopsis'  => [
 				[
@@ -75,7 +56,7 @@ class CssMigrator implements InterfaceCommand {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_export_current_theme_custom_css( $args, $assoc_args ) {
+	public static function cmd_export_current_theme_custom_css( $args, $assoc_args ) {
 		$output_dir = isset( $assoc_args[ 'output-dir' ] ) ? $assoc_args[ 'output-dir' ] : null;
 		if ( is_null( $output_dir ) || ! is_dir( $output_dir ) ) {
 			WP_CLI::error( 'Invalid output dir.' );
@@ -83,7 +64,7 @@ class CssMigrator implements InterfaceCommand {
 
 		WP_CLI::line( sprintf( 'Exporting custom CSS...' ) );
 
-		$result = $this->export_current_theme_custom_css( $output_dir, self::CSS_CURRENT_THEME_EXPORT_FILE );
+		$result = self::get_instance()->export_current_theme_custom_css( $output_dir, self::CSS_CURRENT_THEME_EXPORT_FILE );
 		if ( true === $result ) {
 			WP_CLI::success( 'Done.' );
 			exit(0);
@@ -119,7 +100,7 @@ class CssMigrator implements InterfaceCommand {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public function cmd_import_custom_css_file( $args, $assoc_args ) {
+	public static function cmd_import_custom_css_file( $args, $assoc_args ) {
 		$input_dir = isset( $assoc_args[ 'input-dir' ] ) ? $assoc_args[ 'input-dir' ] : null;
 		if ( is_null( $input_dir ) || ! is_dir( $input_dir ) ) {
 			WP_CLI::error( 'Invalid input dir.' );
@@ -133,9 +114,9 @@ class CssMigrator implements InterfaceCommand {
 
 		WP_CLI::line( 'Importing custom CSS from ' . $import_file . ' ...' );
 
-		$this->delete_all_custom_css();
+		self::get_instance()->delete_all_custom_css();
 		PostsMigrator::get_instance()->import_posts( $import_file );
-		$this->update_theme_mod_custom_css();
+		self::get_instance()->update_theme_mod_custom_css();
 
 		WP_CLI::success( 'Done.' );
 	}
