@@ -7,8 +7,8 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
-use \WP_CLI;
-use \WP_User;
+use WP_CLI;
+use WP_User;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
 use NewspackCustomContentMigrator\Utils\PHP as PHPUtil;
@@ -191,7 +191,7 @@ class ContentDiffMigrator {
 			$this->wpdb->prepare(
 				"SELECT wpm.post_id, wpm.meta_value
 					FROM {$this->wpdb->postmeta} wpm
-					JOIN {$this->wpdb->posts} wp ON wp.ID = wpm.post_id 
+					JOIN {$this->wpdb->posts} wp ON wp.ID = wpm.post_id
 					WHERE wpm.meta_key = %s
 					AND wp.post_type = 'attachment';",
 				self::SAVED_META_LIVE_POST_ID,
@@ -220,7 +220,7 @@ class ContentDiffMigrator {
 			$this->wpdb->prepare(
 				"SELECT wpm.post_id, wpm.meta_value
 					FROM {$this->wpdb->postmeta} wpm
-					JOIN {$this->wpdb->posts} wp ON wp.ID = wpm.post_id 
+					JOIN {$this->wpdb->posts} wp ON wp.ID = wpm.post_id
 					WHERE wpm.meta_key = %s
 					AND wp.post_type IN ( {$post_types_placeholders} );",
 				array_merge(
@@ -482,12 +482,13 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Checks local Categories, and returns those which might have wrong parent term_ids that don't exist.
+	 * Checks local Hierarchical Taxonomies, and returns those which might have wrong parent term_ids that don't exist.
 	 *
 	 * @param string $table_prefix DB table prefix which is to be used for this query.
+	 * @param array  $taxonomies_to_check Hierarchical Taxonomies to check.
 	 *
 	 * @return array $args {
-	 *     Categories which have nonexistent parent term_id.
+	 *     Hierarchical Taxonomies which have nonexistent parent term_id.
 	 *
 	 *     @type string term_id          wp_terms.term_id.
 	 *     @type string name             wp_terms.name.
@@ -497,25 +498,30 @@ class ContentDiffMigrator {
 	 *     @type string parent           wp_termtaxonomy.parent which is not found in wp_terms and is wrong.
 	 * }
 	 */
-	public function get_categories_with_nonexistent_parents( $table_prefix ): array {
+	public function get_taxonomies_with_nonexistent_parents( $table_prefix, $taxonomies_to_check ): array {
 
 		$terms         = esc_sql( $table_prefix . 'terms' );
 		$term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
 
 		// phpcs:disable -- wpdb::prepare used by wrapper and query fully sanitized.
-		$categories_with_nonexistent_parents = $this->wpdb->get_results(
-			"SELECT t.term_id, t.name, t.slug, tt.term_taxonomy_id, tt.term_id, tt.taxonomy, tt.parent
-			FROM {$terms} t
-	        JOIN {$term_taxonomy} tt
-				ON t.term_id = tt.term_id AND tt.taxonomy = 'category' AND parent <> 0
-	        LEFT JOIN {$terms} ttparent
-				ON ttparent.term_id = tt.parent
-			WHERE ttparent.term_id IS NULL;",
+		$taxonomy_format = implode( ', ', array_fill( 0, count( $taxonomies_to_check ), '%s' ) );
+		$taxonomies_with_nonexistent_parents = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT t.term_id, t.name, t.slug, tt.term_taxonomy_id, tt.term_id, tt.taxonomy, tt.parent
+				FROM {$terms} t
+				JOIN {$term_taxonomy} tt
+					ON t.term_id = tt.term_id AND tt.taxonomy IN ($taxonomy_format) AND parent <> 0
+				LEFT JOIN {$terms} ttparent
+					ON ttparent.term_id = tt.parent
+				WHERE ttparent.term_id IS NULL;",
+				$taxonomies_to_check
+			)
+			,
 			ARRAY_A
 		);
 		// phpcs:enable
 
-		return $categories_with_nonexistent_parents;
+		return $taxonomies_with_nonexistent_parents;
 	}
 
 	/**
@@ -526,7 +532,7 @@ class ContentDiffMigrator {
 	 *
 	 * @return void
 	 */
-	public function reset_categories_parents( string $table_prefix, array $term_taxonomy_ids ): void {
+	public function reset_hierarchical_taxonomies_parents( string $table_prefix, array $term_taxonomy_ids ): void {
 		$placeholders  = implode( ',', array_fill( 0, count( $term_taxonomy_ids ), '%d' ) );
 		$term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
 		// phpcs:disable -- wpdb::prepare used by wrapper and query fully sanitized.
@@ -540,78 +546,84 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Recreates all categories from Live to local.
+	 * Recreates all hierarchical taxonomies from Live to local.
 	 *
 	 * @param string $live_table_prefix Live DB table prefix.
+	 * @param array  $hierarchical_taxonomies_to_migrate Hierarchical taxonomies to migrate.
 	 *
-	 * @return array Map of all live to local categories. Keys are live category term_ids, and values are their corresponding
+	 * @return array Map of all live to local hierarchical taxonomies. Keys are live category term_ids, and values are their corresponding
 	 *               local category term_ids.
 	 */
-	public function recreate_categories( $live_table_prefix ) {
+	public function recreate_hierarchical_taxonomies( $live_table_prefix, $hierarchical_taxonomies_to_migrate ) {
 		$table_prefix             = $this->wpdb->prefix;
 		$live_terms_table         = esc_sql( $live_table_prefix . 'terms' );
 		$live_termstaxonomy_table = esc_sql( $live_table_prefix . 'term_taxonomy' );
 
-		// Get all live site's hierarchical categories, ordered by parent for easy hierarchical reconstruction.
+		// Get all live site's hierarchical hierarchical taxonomies, ordered by parent for easy hierarchical reconstruction.
 		// phpcs:disable -- wpdb::prepare is used by wrapper.
-		$live_categories = $this->wpdb->get_results(
-			"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
-			FROM $live_terms_table t
-	        JOIN $live_termstaxonomy_table tt ON t.term_id = tt.term_id
-			WHERE tt.taxonomy IN ( 'category' )
-			ORDER BY tt.parent;",
+		$taxonomy_format = implode( ', ', array_fill( 0, count( $hierarchical_taxonomies_to_migrate ), '%s' ) );
+		$live_hierarchical_taxonomies = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
+				FROM $live_terms_table t
+				JOIN $live_termstaxonomy_table tt ON t.term_id = tt.term_id
+				WHERE tt.taxonomy IN ($taxonomy_format)
+				ORDER BY tt.parent;",
+				$hierarchical_taxonomies_to_migrate
+			),
 			ARRAY_A
 		);
 		// phpcs:enable
 
-		// Go through all the $live_taxonomies and get or create them on local, and mark their term_id changes in $category_term_id_updates.
-		$category_term_id_updates = [];
-		foreach ( $live_categories as $live_category ) {
-			$live_category_tree    = $this->get_category_tree( $live_table_prefix, $live_category );
-			$created_category_tree = $this->get_or_create_category_tree( $table_prefix, $live_category_tree );
+		// Go through all the $live_taxonomies and get or create them on local, and mark their term_id changes in $hierarchical_taxonomy_term_id_updates.
+		$hierarchical_taxonomy_term_id_updates = [];
+		foreach ( $live_hierarchical_taxonomies as $live_hierarchical_taxonomy ) {
+			$live_hierarchical_taxonomy_tree    = $this->get_hierarchical_taxonomy_tree( $live_table_prefix, $live_hierarchical_taxonomy, $hierarchical_taxonomies_to_migrate );
+			$created_hierarchical_taxonomy_tree = $this->get_or_create_hierarchical_taxonomy_tree( $table_prefix, $live_hierarchical_taxonomy_tree );
 
-			$category_term_id_updates[ $live_category['term_id'] ] = $created_category_tree['term_id'];
+			$hierarchical_taxonomy_term_id_updates[ $live_hierarchical_taxonomy['term_id'] ] = $created_hierarchical_taxonomy_tree['term_id'];
 		}
 
-		return $category_term_id_updates;
+		return $hierarchical_taxonomy_term_id_updates;
 	}
 
 	/**
-	 * Fetches the category's tree by retrieving all the parent categories down to the top parent.
+	 * Fetches the hierarchical taxonomy's tree by retrieving all the parent hierarchical taxonomies down to the top parent.
 	 *
 	 * @param string $table_prefix DB table prefix.
-	 * @param array  $category {
-	 *    Category data array.
+	 * @param array  $hierarchical_taxonomy {
+	 *    Hierarchical taxonomy data array.
 	 *
-	 *     @type string term_id     Category term_id.
-	 *     @type string taxonomy    Should always be 'category'.
-	 *     @type string name        Category name.
-	 *     @type string slug        Category slug.
-	 *     @type string description Category description.
-	 *     @type string count       Category count.
-	 *     @type string parent      Category parent term_id.
+	 *     @type string term_id     Hierarchical taxonomy term_id.
+	 *     @type string taxonomy    Should always be a hierarchical taxonomy.
+	 *     @type string name        Hierarchical taxonomy name.
+	 *     @type string slug        Hierarchical taxonomy slug.
+	 *     @type string description Hierarchical taxonomy description.
+	 *     @type string count       Hierarchical taxonomy count.
+	 *     @type string parent      Hierarchical taxonomy parent term_id.
 	 * }
+	 * @param array  $hierarchical_taxonomies_to_get Hierarchical taxonomies to get their trees.
 	 *
 	 * @return array {
-	 *     A nested array of categories, where 'parent' key is either another subarray category, or '0' if no parent.
+	 *     A nested array of hierarchical taxonomies, where 'parent' key is either another subarray hierarchical taxonomy, or '0' if no parent.
 	 *
-	 *     @type string       term_id     Category term_id.
-	 *     @type string       taxonomy    Should always be 'category'.
-	 *     @type string       name        Category name.
-	 *     @type string       slug        Category slug.
-	 *     @type string       description Category description.
-	 *     @type string       count       Category count.
-	 *     @type string|array parent      Either nested parent subarray category containing all the same keys and values, or '0'.
+	 *     @type string       term_id     Hierarchical taxonomy term_id.
+	 *     @type string       taxonomy    Should always be a hierarchical taxonomy.
+	 *     @type string       name        Hierarchical taxonomy name.
+	 *     @type string       slug        Hierarchical taxonomy slug.
+	 *     @type string       description Hierarchical taxonomy description.
+	 *     @type string       count       Hierarchical taxonomy count.
+	 *     @type string|array parent      Either nested parent subarray hierarchical taxonomy containing all the same keys and values, or '0'.
 	 * }
 	 */
-	public function get_category_tree( $table_prefix, $category ) {
+	public function get_hierarchical_taxonomy_tree( $table_prefix, $hierarchical_taxonomy, $hierarchical_taxonomies_to_get ) {
 
-		$category_tree = $category;
+		$hierarchical_taxonomy_tree = $hierarchical_taxonomy;
 
 		$table_terms         = esc_sql( $table_prefix . 'terms' );
 		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
 
-		$parent_term_id = $category['parent'];
+		$parent_term_id = $hierarchical_taxonomy['parent'];
 		if ( 0 != $parent_term_id ) {
 			// phpcs:disable -- wpdb::prepare used by wrapper.
 			$parent_row = $this->wpdb->get_row(
@@ -619,132 +631,109 @@ class ContentDiffMigrator {
 					"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
 					FROM {$table_terms} t
 			        JOIN {$table_term_taxonomy} tt ON t.term_id = tt.term_id
-					WHERE tt.taxonomy IN ( 'category' )
+					WHERE tt.taxonomy = %s
 					AND t.term_id = %s
 					ORDER BY tt.parent;",
-					$parent_term_id
+					[ $hierarchical_taxonomy['taxonomy'], $parent_term_id ]
 				),
 				ARRAY_A
 			);
 			// phpcs:enable
 
-			// This is either root category, or go level up recursively.
+			// This is either root taxonomy, or go level up recursively.
 			if ( 0 == $parent_row['parent'] ) {
-				$category_tree['parent'] = $parent_row;
+				$hierarchical_taxonomy_tree['parent'] = $parent_row;
 			} else {
-				$category_tree['parent'] = $this->get_category_tree( $table_prefix, $parent_row );
+				$hierarchical_taxonomy_tree['parent'] = $this->get_hierarchical_taxonomy_tree( $table_prefix, $parent_row, $hierarchical_taxonomies_to_get );
 			}
 		}
 
-		return $category_tree;
+		return $hierarchical_taxonomy_tree;
 	}
 
 	/**
-	 * Rebuilds the full tree of a category. Either taxes an existing category, or creates it.
+	 * Rebuilds the full tree of a hierarchical taxonomy. Either taxes an existing hierarchical taxonomy, or creates it.
 	 *
 	 * @param string $table_prefix  DB table prefix.
-	 * @param array  $category_tree {
-	 *     A nested array of categories, where 'parent' key is either another subarray category, or '0' if no parent.
+	 * @param array  $hierarchical_taxonomy_tree {
+	 *     A nested array of hierarchical taxonomies, where 'parent' key is either another subarray hierarchical taxonomy, or '0' if no parent.
 	 *     This is being read as a parameter and will be rebuilt node by node.
 	 *
-	 *     @type string       term_id     Category term_id.
-	 *     @type string       taxonomy    Should always be 'category'.
-	 *     @type string       name        Category name.
-	 *     @type string       slug        Category slug.
-	 *     @type string       description Category description.
-	 *     @type string       count       Category count.
-	 *     @type string|array parent      Either nested parent subarray category containing all the same keys and values, or '0'.
+	 *     @type string       term_id     Hierarchical Taxonomy term_id.
+	 *     @type string       taxonomy    Should always be a hierarchical taxonomy.
+	 *     @type string       name        Hierarchical Taxonomy name.
+	 *     @type string       slug        Hierarchical Taxonomy slug.
+	 *     @type string       description Hierarchical Taxonomy description.
+	 *     @type string       count       Hierarchical Taxonomy count.
+	 *     @type string|array parent      Either nested parent subarray hierarchical taxonomy containing all the same keys and values, or '0'.
 	 * }
 	 *
 	 * @return array {
-	 *     A nested array of categories, where 'parent' key is either another subarray category, or '0' if no parent.
-	 *     This is the resulting category tree, either existing categories fetched or new ones created.
+	 *     A nested array of hierarchical taxonomies, where 'parent' key is either another subarray hierarchical taxonomy, or '0' if no parent.
+	 *     This is the resulting hierarchical taxonomy tree, either existing hierarchical taxonomies fetched or new ones created.
 	 *
-	 *     @type string       term_id     Category term_id.
-	 *     @type string       taxonomy    Should always be 'category'.
-	 *     @type string       name        Category name.
-	 *     @type string       slug        Category slug.
-	 *     @type string       description Category description.
-	 *     @type string       count       Category count.
-	 *     @type string|array parent      Either nested parent subarray category containing all the same keys and values, or '0'.
+	 *     @type string       term_id     Hierarchical Taxonomy term_id.
+	 *     @type string       taxonomy    Should always be a hierarchical taxonomy.
+	 *     @type string       name        Hierarchical Taxonomy name.
+	 *     @type string       slug        Hierarchical Taxonomy slug.
+	 *     @type string       description Hierarchical Taxonomy description.
+	 *     @type string       count       Hierarchical Taxonomy count.
+	 *     @type string|array parent      Either nested parent subarray hierarchical taxonomy containing all the same keys and values, or '0'.
 	 * }
 	 */
-	public function get_or_create_category_tree( $table_prefix, $category_tree ) {
+	public function get_or_create_hierarchical_taxonomy_tree( $table_prefix, $hierarchical_taxonomy_tree ) {
+		// If this is the top parent hierarchical taxonomy, get or create it.
+		if ( 0 == $hierarchical_taxonomy_tree['parent'] ) {
 
-		$table_terms         = esc_sql( $table_prefix . 'terms' );
-		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
-
-		// If this is the top parent category, get or create it.
-		if ( 0 == $category_tree['parent'] ) {
-
-			// Get or create this top parent category.
-			$category_top_parent_row     = $this->get_category_array_by_name_and_parent( $table_prefix, $category_tree['name'], 0 );
-			$category_top_parent_term_id = $category_top_parent_row['term_id'] ?? null;
-			if ( ! $category_top_parent_term_id ) {
+			// Get or create this top parent hierarchical taxonomy.
+			$hierarchical_taxonomy_top_parent_row     = $this->get_hierarchical_taxonomy_array_by_name_and_parent( $table_prefix, $hierarchical_taxonomy_tree['name'], $hierarchical_taxonomy_tree['taxonomy'], 0 );
+			$hierarchical_taxonomy_top_parent_term_id = $hierarchical_taxonomy_top_parent_row['term_id'] ?? null;
+			if ( ! $hierarchical_taxonomy_top_parent_term_id ) {
 				// Insert it if it doesn't exist.
-				$category_top_parent_term_id = $this->wp_insert_category(
-					$table_prefix,
-					[
-						'cat_name'             => $category_tree['name'],
-						'category_description' => $category_tree['description'],
-						'category_parent'      => 0,
-					]
+				$hierarchical_taxonomy_top_parent_term_id = $this->wp_insert_or_update_term(
+					$hierarchical_taxonomy_tree['name'],
+					$hierarchical_taxonomy_tree['description'],
+					0,
+					$hierarchical_taxonomy_tree['taxonomy']
 				);
 			}
-			// Get this parent category's full array.
-			$category_top_parent = $this->get_category_array_by_term_id( $table_prefix, $category_top_parent_term_id );
-
-			return $category_top_parent;
-		}
-
-		// If this is not top parent category, keep going deeper recursively until reaching it.
-		if ( 0 != $category_tree['parent'] ) {
-			$current_parent_tree = $this->get_or_create_category_tree( $table_prefix, $category_tree['parent'] );
-		}
-
-		// For a non-top-parent category, get or create its tree and return.
-		$category_row     = $this->get_category_array_by_name_and_parent( $table_prefix, $category_tree['name'], $current_parent_tree['term_id'] );
-		$category_term_id = $category_row['term_id'] ?? null;
-		if ( ! $category_term_id ) {
-			$category_term_id = $this->wp_insert_category(
+			// Get this parent taxonomy's full array.
+			$hierarchical_taxonomy_top_parent = $this->get_term_and_taxonomy_array(
 				$table_prefix,
-				[
-					'cat_name'             => $category_tree['name'],
-					'category_description' => $category_tree['description'],
-					'category_parent'      => $current_parent_tree['term_id'],
-				]
+				[ 'term_id' => $hierarchical_taxonomy_top_parent_term_id ],
+				$hierarchical_taxonomy_tree['taxonomy']
+			);
+
+			return $hierarchical_taxonomy_top_parent;
+		}
+
+		// If this is not top parent taxonomy, keep going deeper recursively until reaching it.
+		if ( 0 != $hierarchical_taxonomy_tree['parent'] ) {
+			$current_parent_tree = $this->get_or_create_hierarchical_taxonomy_tree( $table_prefix, $hierarchical_taxonomy_tree['parent'] );
+		}
+
+		// For a non-top-parent taxonomy, get or create its tree and return.
+		$taxonomy_row     = $this->get_hierarchical_taxonomy_array_by_name_and_parent( $table_prefix, $hierarchical_taxonomy_tree['name'], $hierarchical_taxonomy_tree['taxonomy'], $current_parent_tree['term_id'] );
+		$taxonomy_term_id = $taxonomy_row['term_id'] ?? null;
+		if ( ! $taxonomy_term_id ) {
+			$taxonomy_term_id = $this->wp_insert_or_update_term(
+				$hierarchical_taxonomy_tree['name'],
+				$hierarchical_taxonomy_tree['description'],
+				$current_parent_tree['term_id'],
+				$hierarchical_taxonomy_tree['taxonomy']
 			);
 		}
-		$category = $this->get_category_array_by_term_id( $table_prefix, $category_term_id );
+		$taxonomy = $this->get_term_and_taxonomy_array(
+			$table_prefix,
+			[ 'term_id' => $taxonomy_term_id ],
+			$hierarchical_taxonomy_tree['taxonomy']
+		);
 
-		// This is the reubuilt category tree.
-		$rebuilt_category_tree           = $category;
-		$rebuilt_category_tree['parent'] = $current_parent_tree;
+		// This is the reubuilt taxonomy tree.
+		$rebuilt_hierarchical_taxonomy_tree           = $taxonomy;
+		$rebuilt_hierarchical_taxonomy_tree['parent'] = $current_parent_tree;
 
-		return $rebuilt_category_tree;
-	}
-
-	/**
-	 * Gets a category array with all the related data by term_id.
-	 *
-	 * @param string $table_prefix DB table prefix.
-	 * @param string $term_id      term_id.
-	 *
-	 * @return array {
-	 *     @type string term_id     Category term_id.
-	 *     @type string taxonomy    Should always be 'category'.
-	 *     @type string name        Category name.
-	 *     @type string slug        Category slug.
-	 *     @type string description Category description.
-	 *     @type string count       Category count.
-	 *     @type string parent      Category parent's term_id.
-	 * }
-	 */
-	public function get_category_array_by_term_id( $table_prefix, $term_id ) {
-
-		$category_data = $this->get_term_and_taxonomy_array( $table_prefix, [ 'term_id' => $term_id ], 'category' );
-
-		return $category_data;
+		return $rebuilt_hierarchical_taxonomy_tree;
 	}
 
 	/**
@@ -800,101 +789,95 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Gets category by its name and parent.
+	 * Gets hierarchical taxonomy by its name and parent.
 	 *
-	 * @param string $table_prefix    DB table prefix.
-	 * @param string $cat_name        Category name.
-	 * @param string $cat_parent      Category parent's term_id.
+	 * @param string $table_prefix          DB table prefix.
+	 * @param string $taxonomy_name         Hierarchical Taxonomy name.
+	 * @param string $taxonomy              Hierarchical Taxonomy.
+	 * @param string $taxonomy_parent       Hierarchical Taxonomy parent's term_id.
 	 *
 	 * @return array {
-	 *     @type string term_id     Category term_id.
-	 *     @type string taxonomy    Should always be 'category'.
-	 *     @type string name        Category name.
-	 *     @type string slug        Category slug.
-	 *     @type string description Category description.
-	 *     @type string count       Category count.
-	 *     @type string parent      Category parent's term_id.
+	 *     @type string term_id     Hierarchical Taxonomy term_id.
+	 *     @type string taxonomy    Should always be a hierarchical taxonomy.
+	 *     @type string name        Hierarchical Taxonomy name.
+	 *     @type string slug        Hierarchical Taxonomy slug.
+	 *     @type string description Hierarchical Taxonomy description.
+	 *     @type string count       Hierarchical Taxonomy count.
+	 *     @type string parent      Hierarchical Taxonomy parent's term_id.
 	 * }
 	 */
-	public function get_category_array_by_name_and_parent( $table_prefix, $cat_name, $cat_parent ) {
+	public function get_hierarchical_taxonomy_array_by_name_and_parent( $table_prefix, $taxonomy_name, $taxonomy, $taxonomy_parent ) {
 		$table_terms         = esc_sql( $table_prefix . 'terms' );
 		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
 
 		// phpcs:disable -- wpdb::prepare used by wrapper.
-		$category = $this->wpdb->get_row(
+		$hierarchical_taxonomy = $this->wpdb->get_row(
 			$this->wpdb->prepare(
 				"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
 					FROM $table_terms t
 			        JOIN $table_term_taxonomy tt ON t.term_id = tt.term_id
-					WHERE tt.taxonomy = 'category'
+					WHERE tt.taxonomy = %s
 					AND tt.parent = %s
 					AND t.name = %s;",
-				$cat_parent,
-				$cat_name
+				$taxonomy,
+				$taxonomy_parent,
+				$taxonomy_name
 			),
 			ARRAY_A
 		);
 		// phpcs:enable
 
-		return $category;
+		return $hierarchical_taxonomy;
 	}
 
 	/**
-	 * Gets category by its name, description and parent
+	 * Create a term in a hierarchical taxonomy, or update it if it already exists.
 	 *
-	 * @param string $table_prefix    DB table prefix.
-	 * @param string $cat_name        Category name.
-	 * @param string $cat_description Category description.
-	 * @param string $cat_parent      Category parent's term_id.
+	 * @param string $term_name         Term name.
+	 * @param string $term_description  Term description.
+	 * @param string $term_parent       Term parent's term_id.
+	 * @param string $taxonomy          Taxonomy.
 	 *
-	 * @return array {
-	 *     @type string term_id     Category term_id.
-	 *     @type string taxonomy    Should always be 'category'.
-	 *     @type string name        Category name.
-	 *     @type string slug        Category slug.
-	 *     @type string description Category description.
-	 *     @type string count       Category count.
-	 *     @type string parent      Category parent's term_id.
-	 * }
-	 */
-	public function get_category_array_by_name_description_and_parent( $table_prefix, $cat_name, $cat_description, $cat_parent ) {
-		$table_terms         = esc_sql( $table_prefix . 'terms' );
-		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
-
-		// phpcs:disable -- wpdb::prepare used by wrapper.
-		$category = $this->wpdb->get_row(
-			$this->wpdb->prepare(
-				"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
-					FROM $table_terms t
-			        JOIN $table_term_taxonomy tt ON t.term_id = tt.term_id
-					WHERE tt.taxonomy = 'category'
-					AND tt.parent = %s
-					AND t.name = %s
-					AND tt.description = %s;",
-				$cat_parent,
-				$cat_name,
-				$cat_description
-			),
-			ARRAY_A
-		);
-		// phpcs:enable
-
-		return $category;
-	}
-
-	/**
-	 * A wrapper for \wp_insert_category().
-	 *
-	 * @param string $table_prefix DB table prefix.
-	 * @param array  $catarr       $catarr argument for \wp_insert_category(), see \wp_insert_category().
-	 *
-	 * @return int|\WP_Error The ID number of the new or updated Category on success. Zero or a WP_Error on failure,
+	 * @return int|\WP_Error The ID number of the new or updated Term on success. Zero or a WP_Error on failure,
 	 *                       depending on param `$wp_error`.
 	 */
-	public function wp_insert_category( $table_prefix, $catarr ) {
-		$category_top_parent_term_id = wp_insert_category( $catarr );
+	public function wp_insert_or_update_term( $term_name, $term_description, $term_parent, $taxonomy ) {
+		// Check if the term already exists.
+		$term_exists = term_exists( $term_name, $taxonomy, $term_parent );
 
-		return $category_top_parent_term_id;
+		// If the term doesn't exist, insert it.
+		if ( ! $term_exists ) {
+			$term_id = wp_insert_term(
+				$term_name,
+				$taxonomy,
+				[
+					'description' => $term_description,
+					'parent'      => $term_parent,
+				]
+			);
+
+			if ( is_wp_error( $term_id ) ) {
+				return $term_id;
+			}
+			return $term_id['term_id'];
+		}
+
+		// If the term exists, update it.
+		$term_id     = $term_exists['term_id'];
+		$term_update = wp_update_term(
+			$term_id,
+			$taxonomy,
+			[
+				'description' => $term_description,
+				'parent'      => $term_parent,
+			]
+		);
+
+		if ( is_wp_error( $term_update ) ) {
+			return $term_update;
+		}
+
+		return $term_id;
 	}
 
 	/**
@@ -904,12 +887,12 @@ class ContentDiffMigrator {
 	 * @param array $data                     Array containing all the data, @see
 	 *                                        \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::get_post_data
 	 *                                        for structure.
-	 * @param array $category_term_id_updates Category term_ids updates. Keys are old Live category term_ids, and values are
-	 *                                        corresponding Categories on local (Staging) term_ids.
+	 * @param array $hierarchical_taxonomy_term_id_updates Hierarchical Taxonomy term_ids updates. Keys are old Live hierarchical taxonomy term_ids, and values are
+	 *                                        corresponding Hierarchical Taxonomies on local (Staging) term_ids.
 	 *
 	 * @return array List of errors which occurred.
 	 */
-	public function import_post_data( $post_id, $data, $category_term_id_updates ) {
+	public function import_post_data( $post_id, $data, $hierarchical_taxonomy_term_id_updates ) {
 		$error_messages = [];
 
 		// Insert Post Metas.
@@ -1014,14 +997,13 @@ class ContentDiffMigrator {
 			}
 		}
 
-		// Import 'category' and 'post_tag' taxonomies.
+		// Import taxonomies.
 		$inserted_term_taxonomy_ids = [];
-		foreach ( $data[ self::DATAKEY_TERMRELATIONSHIPS ] as $key_term_relationship_row => $term_relationship_row ) {
+		foreach ( $data[ self::DATAKEY_TERMRELATIONSHIPS ] as $term_relationship_row ) {
 
 			$live_term_taxonomy_id  = $term_relationship_row['term_taxonomy_id'];
 			$live_term_taxonomy_row = $this->filter_array_element( $data[ self::DATAKEY_TERMTAXONOMY ], 'term_taxonomy_id', $live_term_taxonomy_id );
 			$live_term_id           = $live_term_taxonomy_row['term_id'];
-			$live_taxonomy          = $live_term_taxonomy_row['taxonomy'];
 			$live_term_row          = $this->filter_array_element( $data[ self::DATAKEY_TERMS ], 'term_id', $live_term_id );
 
 			// Validate live term row, it could be missing or invalid.
@@ -1038,28 +1020,27 @@ class ContentDiffMigrator {
 			$local_term_taxonomy_count = null;
 			// Helper vars.
 			$local_term_taxonomy_data = null;
-			$local_term_name          = null;
 
-			// If it's a category, all of them have already been recreated on Staging -- see $category_term_id_updates. Now just get the local corresponding term_taxonomy_id for this $live_term_taxonomy_id.
-			if ( 'category' == $live_term_taxonomy_row['taxonomy'] ) {
+			// If it's a hierarchical taxonomy, all of them have already been recreated on Staging -- see $hierarchical_taxonomy_term_id_updates. Now just get the local corresponding term_taxonomy_id for this $live_term_taxonomy_id.
+			if ( is_taxonomy_hierarchical( $live_term_taxonomy_row['taxonomy'] ) ) {
 
-				$local_term_id             = $category_term_id_updates[ $live_term_id ];
-				$local_term_taxonomy_data  = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_id' => $local_term_id ], 'category' );
+				$local_term_id             = $hierarchical_taxonomy_term_id_updates[ $live_term_id ];
+				$local_term_taxonomy_data  = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_id' => $local_term_id ], $live_term_taxonomy_row['taxonomy'] );
 				$local_term_taxonomy_id    = $local_term_taxonomy_data['term_taxonomy_id'];
-				$local_term_name           = $local_term_taxonomy_data['name'];
 				$local_term_taxonomy_count = $local_term_taxonomy_data['count'];
 
-			} elseif ( 'post_tag' == $live_term_taxonomy_row['taxonomy'] ) {
+			} else {
 
-				// Get or insert this Tag.
-				$local_term_taxonomy_data = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_name' => $live_term_name ], 'post_tag' );
+				// Get or insert the taxonomy.
+				$local_term_taxonomy_data = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_name' => $live_term_name ], $live_term_taxonomy_row['taxonomy'] );
 				if ( is_null( $local_term_taxonomy_data ) || empty( $local_term_taxonomy_data ) ) {
 
-					// Create a new Tag.
-					$term_insert_result = $this->wp_insert_term( $live_term_name, 'post_tag' );
+					// Create a new Term.
+					$term_insert_result = $this->wp_insert_term( $live_term_name, $live_term_taxonomy_row['taxonomy'], [ 'description' => $live_term_taxonomy_row['description'] ] );
 					if ( is_wp_error( $term_insert_result ) ) {
 						$error_messages[] = sprintf(
-							"Error occurred while inserting post_tag '%s' live_term_id=%s at live_post_ID=%s :%s",
+							"Error occurred while inserting %s '%s' live_term_id=%s at live_post_ID=%s :%s",
+							$live_term_taxonomy_row['taxonomy'],
 							$live_term_name,
 							$live_term_id,
 							$post_id,
@@ -1071,7 +1052,7 @@ class ContentDiffMigrator {
 
 					$local_term_id             = $term_insert_result['term_id'];
 					$local_term_taxonomy_id    = $term_insert_result['term_taxonomy_id'];
-					$local_term_taxonomy_data  = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_id' => $local_term_id ], 'post_tag' );
+					$local_term_taxonomy_data  = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_id' => $local_term_id ], $live_term_taxonomy_row['taxonomy'] );
 					$local_term_taxonomy_count = $local_term_taxonomy_data['count'];
 
 				} else {
@@ -1085,8 +1066,8 @@ class ContentDiffMigrator {
 
 			/**
 			 * We need to check if the same $local_term_taxonomy_id has already been inserted. This can happen if there are two
-			 * tags which have the same name but different case, e.g. first tag with name 'reseñas' and second with name 'Reseñas'.
-			 * WP distinguishes these Tags, but we should clean them up as we get the chance and merge them.
+			 * terms which have the same name but different case, e.g. first term with name 'reseñas' and second with name 'Reseñas'.
+			 * WP distinguishes these Terms, but we should clean them up as we get the chance and merge them.
 			 */
 			$term_relationship_is_double = in_array( $local_term_taxonomy_id, $inserted_term_taxonomy_ids );
 
@@ -1094,8 +1075,15 @@ class ContentDiffMigrator {
 				// Insert the Term Relationship record.
 				$this->insert_term_relationship( $post_id, $local_term_taxonomy_id );
 
-				// Increment wp_term_taxonomy.count.
-				$this->wpdb->update( $this->wpdb->term_taxonomy, [ 'count' => ( (int) $local_term_taxonomy_count + 1 ) ], [ 'term_taxonomy_id' => $local_term_taxonomy_id ] );
+				// Increment wp_term_taxonomy.count, and update wp_term_taxonomy.description.
+				$this->wpdb->update(
+					$this->wpdb->term_taxonomy,
+					[
+						'count'       => ( (int) $local_term_taxonomy_count + 1 ),
+						'description' => $live_term_taxonomy_row['description'],
+					],
+					[ 'term_taxonomy_id' => $local_term_taxonomy_id ]
+				);
 
 				$inserted_term_taxonomy_ids[] = $local_term_taxonomy_id;
 			}
@@ -2662,7 +2650,7 @@ class ContentDiffMigrator {
 			$where_sprintf = '';
 			foreach ( $where_conditions as $column => $value ) {
 				$where_sprintf .= ( ! empty( $where_sprintf ) ? ' AND' : '' )
-								  . ' ' . esc_sql( $column ) . ' = %s';
+									. ' ' . esc_sql( $column ) . ' = %s';
 			}
 			$where_sprintf = ' WHERE' . $where_sprintf;
 			$sql_sprintf   = $sql . $where_sprintf;
@@ -3157,7 +3145,7 @@ class ContentDiffMigrator {
 		$table_columns_sql = "SHOW COLUMNS FROM $source_table";
 		// phpcs:ignore -- query fully sanitized.
 		$table_columns_results = $this->wpdb->get_results( $table_columns_sql );
-		$table_columns         = implode( ',', array_map( fn( $column_row) => "`$column_row->Field`", $table_columns_results ) );
+		$table_columns         = implode( ',', array_map( fn( $column_row ) => "`$column_row->Field`", $table_columns_results ) );
 		// phpcs:ignore -- query fully sanitized.
 		$count                 = $this->wpdb->get_row( "SELECT COUNT(*) as counter FROM $backup_table;" );
 
