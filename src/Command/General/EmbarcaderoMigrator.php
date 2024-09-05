@@ -1181,6 +1181,30 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'name'        => 'story-csv-path',
 						'description' => 'Path to the CSV file containing the stories.',
 						'optional'    => false,
+						'repeating' => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-missing-gallery-images-check',
+			[ $this, 'cmd_embarcadero_missing_gallery_images_check' ],
+			[
+				'shortdesc' => 'Check for missing gallery images in the media library.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-photos-path',
+						'description' => 'Path to the CSV file containing the story photos to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-photos-grouped-by-story-id-csv-path',
+						'description' => 'Path to the CSV file containing aggregated info.',
+						'optional'    => false,
 						'repeating'   => false,
 					],
 				],
@@ -4378,6 +4402,94 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					]
 				);
 			}
+		}
+	}
+
+	public function cmd_embarcadero_missing_gallery_images_check( array $args, array $assoc_args ): void {
+		$grouped_by_story_id = $assoc_args['story-photos-grouped-by-story-id-csv-path'];
+		$story_photos        = $assoc_args['story-photos-path'];
+
+		$grouped_iterator      = ( new FileImportFactory() )->get_file( $grouped_by_story_id )->getIterator();
+		$story_photos_iterator = ( new FileImportFactory() )->get_file( $story_photos )->getIterator();
+
+		$header  = [
+			'story_id'              => null,
+			'instances'             => null,
+			'photo_ids'             => null,
+			'count_found_photo_ids' => null,
+			'post_id'               => null,
+			'attachment_ids'        => null,
+			'count_attachment_ids'  => null,
+			'difference'            => 'NO',
+		];
+		$qa_file = fopen( 'missing_galleries_qa.csv', 'w' );
+		fputcsv( $qa_file, array_keys( $header ) );
+
+		global $wpdb;
+
+		foreach ( $grouped_iterator as $row ) {
+			$story_id  = $row['story_id'];
+			$instances = $row['instances'];
+
+			$qa_row = array_merge(
+				$header,
+				[
+					'story_id'  => $story_id,
+					'instances' => $instances,
+				]
+			);
+
+			WP_CLI::line( sprintf( 'Story ID: %d | Instances: %d', $story_id, $instances ) );
+
+			$original_photo_ids = [];
+
+			while ( $story_photos_iterator->valid() ) {
+				$photo_row = $story_photos_iterator->current();
+				$story_photos_iterator->next();
+
+				if ( $photo_row['story_id'] === $story_id ) {
+					$original_photo_ids[] = $photo_row['photo_id'];
+					WP_CLI::line( sprintf( 'Photo ID: %d', $photo_row['photo_id'] ) );
+					--$instances;
+				}
+
+				if ( 0 === $instances ) {
+					break;
+				}
+			}
+
+			$qa_row['photo_ids']             = implode( ',', $original_photo_ids );
+			$qa_row['count_found_photo_ids'] = count( $original_photo_ids );
+
+			$post_id = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %d",
+					self::EMBARCADERO_ORIGINAL_ID_META_KEY,
+					$story_id
+				)
+			);
+
+			$qa_row['post_id'] = $post_id;
+
+			$photo_id_placeholders = implode( ', ', array_fill( 0, count( $original_photo_ids ), '%d' ) );
+			$attachment_ids        = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT pm.post_id FROM $wpdb->postmeta pm INNER JOIN $wpdb->posts p ON p.ID = pm.post_id WHERE p.post_type = 'attachment' AND pm.meta_key <> %s AND pm.meta_value IN ( $photo_id_placeholders )",
+					self::EMBARCADERO_ORIGINAL_ID_META_KEY,
+					...$original_photo_ids
+				)
+			);
+
+			$qa_row['attachment_ids']       = implode( ', ', $attachment_ids );
+			$qa_row['count_attachment_ids'] = count( $attachment_ids );
+
+			if ( $qa_row['count_found_photo_ids'] !== $qa_row['count_attachment_ids'] ) {
+				$qa_row['difference'] = 'YES';
+			}
+
+			fputcsv( $qa_file, $qa_row );
+
+			WP_CLI::line( sprintf( 'Found %d IDs', count( $original_photo_ids ) ) );
 		}
 	}
 
