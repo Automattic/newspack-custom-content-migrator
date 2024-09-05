@@ -1,4 +1,4 @@
-name: Update NMT Dependency
+name: Update NMT Dependency.
 
 on:
   repository_dispatch:
@@ -16,6 +16,9 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.1'
+
+      - name: Configure Composer authentication
+        run: composer config -g github-oauth.github.com ${{ secrets.GH_CHECKOUT }}
 
       - name: Composer update NMT package
         run: composer update automattic/newspack-migration-tools
