@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          ref: add/update-nmt-dependency
+          ref: trunk
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -22,14 +22,6 @@ jobs:
 
       - name: Composer update NMT package
         run: composer update automattic/newspack-migration-tools
-
-      - name: Commit and push changes
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add composer.json composer.lock
-          git commit -m "GH Action: Update NMT dependency to latest version"
-          git push
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
