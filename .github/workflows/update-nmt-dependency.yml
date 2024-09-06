@@ -17,18 +17,10 @@ jobs:
         with:
           php-version: '8.1'
 
-      - name: Check token (DO NOT KEEP THIS STEP)
+      - name: Bork
         run: |
-          if [ -n "${{ secrets.GH_CHECKOUT }}" ]; then
-            echo "Token is set"
-          else
-            echo "Token is not set"
-          fi
-
-      - name: Setup GitHub CLI
-        run: |
-          gh auth login --with-token <<< "${{ secrets.GH_CHECKOUT }}"
-          gh auth status
+          composer config --global github-oauth.github.com ${{ secrets.GH_CHECKOUT }}
+          composer install
 
       - name: Composer update NMT package
         run: composer update automattic/newspack-migration-tools
