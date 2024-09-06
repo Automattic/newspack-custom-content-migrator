@@ -19,7 +19,8 @@ class CssMigrator implements RegisterCommandInterface {
 	 * {@inheritDoc}
 	 */
 	public static function register_commands(): void {
-		WP_CLI::add_command( 'newspack-content-migrator export-current-theme-custom-css',
+		WP_CLI::add_command(
+			'newspack-content-migrator export-current-theme-custom-css',
 			self::get_command_closure( 'cmd_export_current_theme_custom_css' ),
 			[
 			'shortdesc' => 'Exports custom CSS for current active Theme. Exits with code 0 on success or 1 otherwise.',
@@ -34,9 +35,10 @@ class CssMigrator implements RegisterCommandInterface {
 			],
 		] );
 
-		WP_CLI::add_command( 'newspack-content-migrator import-custom-css-file',
+		WP_CLI::add_command(
+			'newspack-content-migrator import-custom-css-file',
 			self::get_command_closure( 'cmd_import_custom_css_file' ),
-		[
+			[
 			'shortdesc' => 'Imports custom CSS which was exported from the Staging site.',
 			'synopsis'  => [
 				[
@@ -56,7 +58,7 @@ class CssMigrator implements RegisterCommandInterface {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public static function cmd_export_current_theme_custom_css( $args, $assoc_args ) {
+	public function cmd_export_current_theme_custom_css( $args, $assoc_args ) {
 		$output_dir = isset( $assoc_args[ 'output-dir' ] ) ? $assoc_args[ 'output-dir' ] : null;
 		if ( is_null( $output_dir ) || ! is_dir( $output_dir ) ) {
 			WP_CLI::error( 'Invalid output dir.' );
@@ -64,7 +66,7 @@ class CssMigrator implements RegisterCommandInterface {
 
 		WP_CLI::line( sprintf( 'Exporting custom CSS...' ) );
 
-		$result = self::get_instance()->export_current_theme_custom_css( $output_dir, self::CSS_CURRENT_THEME_EXPORT_FILE );
+		$result = $this->export_current_theme_custom_css( $output_dir, self::CSS_CURRENT_THEME_EXPORT_FILE );
 		if ( true === $result ) {
 			WP_CLI::success( 'Done.' );
 			exit(0);
@@ -100,7 +102,7 @@ class CssMigrator implements RegisterCommandInterface {
 	 * @param $args
 	 * @param $assoc_args
 	 */
-	public static function cmd_import_custom_css_file( $args, $assoc_args ) {
+	public function cmd_import_custom_css_file( $args, $assoc_args ) {
 		$input_dir = isset( $assoc_args[ 'input-dir' ] ) ? $assoc_args[ 'input-dir' ] : null;
 		if ( is_null( $input_dir ) || ! is_dir( $input_dir ) ) {
 			WP_CLI::error( 'Invalid input dir.' );
@@ -114,9 +116,9 @@ class CssMigrator implements RegisterCommandInterface {
 
 		WP_CLI::line( 'Importing custom CSS from ' . $import_file . ' ...' );
 
-		self::get_instance()->delete_all_custom_css();
+		$this->delete_all_custom_css();
 		PostsMigrator::get_instance()->import_posts( $import_file );
-		self::get_instance()->update_theme_mod_custom_css();
+		$this->update_theme_mod_custom_css();
 
 		WP_CLI::success( 'Done.' );
 	}
