@@ -17,14 +17,8 @@ jobs:
         with:
           php-version: '8.1'
 
-      - name: Configure Composer Authentication
-        run: composer config --global github-oauth.github.com ${{ secrets.GH_TOKEN }}
-
-      - name: Install Composer Dependencies
-        run: composer install
-
       - name: Composer update NMT package
-        run: composer update automattic/newspack-migration-tools
+        run: COMPOSER_NO_INTERACTION=1 composer update automattic/newspack-migration-tools --no-install
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
