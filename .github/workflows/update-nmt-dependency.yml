@@ -1,4 +1,4 @@
-name: Update NMT Dependency.
+name: Update NMT Dependency
 
 on:
   repository_dispatch:
@@ -17,10 +17,11 @@ jobs:
         with:
           php-version: '8.1'
 
-      - name: Bork
-        run: |
-          composer config --global github-oauth.github.com ${{ secrets.GH_CHECKOUT }}
-          composer install
+      - name: Configure Composer Authentication
+        run: composer config --global github-oauth.github.com ${{ secrets.GH_TOKEN }}
+
+      - name: Install Composer Dependencies
+        run: composer install
 
       - name: Composer update NMT package
         run: composer update automattic/newspack-migration-tools
