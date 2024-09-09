@@ -70,6 +70,7 @@ PluginSetup::register_migrators(
 		Command\General\LedeMigrator::class,
 		Command\General\DownloadMissingImages::class,
 		Command\General\MigrationHelper::class,
+		Command\General\PaidMembershipsPro2WooCommMigrator::class,
 		Command\General\MolonguiAutorship::class,
 		Command\General\MediumMigrator::class,
 		Command\General\CreativeCircleMigrator::class,

@@ -8,6 +8,9 @@ This Plugin consists of various Migrators (which perform reusable or publisher-s
 
 Run `composer install`.
 
+## Pulling the latest from the NMT (newspack-migration-tools)
+If you have just merged stuff to `trunk` in the NMT, you should update the lockfile in this repository. We point to the `dev-trunk` branch in this repo's composer file so run `composer update automattic/newspack-migration-tools` to update the lockfile and get the latest from the NMT. If nothing happens when you update, then run `composer clear-cache` and try again.
+
 ## Usage
 
 The Plugin is installed on a the Staging Site, and executed there to import the most recent content from the current live site.
