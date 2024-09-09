@@ -10,14 +10,17 @@ namespace NewspackCustomContentMigrator\Command\General;
 use DateTime;
 use DateTimeZone;
 use Exception;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Utils\BatchLogic;
 use WP_CLI;
 
 /**
  * Class PostDateMigrator.
  */
-class PostDateMigrator implements InterfaceCommand {
+class PostDateMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * MySQL datetime format - the one WP uses for posts.
@@ -25,34 +28,12 @@ class PostDateMigrator implements InterfaceCommand {
 	const MYSQL_DATETIME_FORMAT = 'Y-m-d H:i:s';
 
 	/**
-	 * Constructor is private on purpose.
-	 */
-	private function __construct() {
-	}
-
-	/**
-	 * Get Instance.
-	 *
-	 * @return self
-	 */
-	public static function get_instance(): self {
-		static $instance = null;
-		if ( null === $instance ) {
-			$instance = new self();
-		}
-
-		return $instance;
-	}
-
-	/**
 	 * {@inheritDoc}
-	 *
-	 * @throws Exception If the registration fails.
 	 */
-	public function register_commands(): void {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator change-posts-timezone',
-			[ $this, 'cmd_change_posts_timezone' ],
+			self::get_command_closure( 'cmd_change_posts_timezone' ),
 			[
 				'shortdesc' => 'Change post dates from one timezone to another',
 				'synopsis'  => [

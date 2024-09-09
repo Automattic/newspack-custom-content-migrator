@@ -7,8 +7,9 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper as CoAuthorPlusLogic;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
@@ -16,7 +17,9 @@ use WP_CLI;
 /**
  * Custom migration scripts for (Simply) Guest Author Name plugin.
  */
-class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
+class SimplyGuestAuthorNameMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * CoAuthorPlusLogic
@@ -37,15 +40,7 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 	 * 
 	 * @var PostsLogic
 	 */
-	private $posts_logic = null;
-
-	/**
-	 * Instance
-	 * 
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
+	private $posts_logic;
 	/**
 	 * Constructor.
 	 */
@@ -56,27 +51,13 @@ class SimplyGuestAuthorNameMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator migrate-simply-guest-author-names',
-			[ $this, 'cmd_migrate_simply_guest_author_names' ],
+			self::get_command_closure( 'cmd_migrate_simply_guest_author_names' ),
 			[
 				'shortdesc' => 'Migrate Simply Guest Author Names to CoAuthorsPlus.',
 				'synopsis'  => [

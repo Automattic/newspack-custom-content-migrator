@@ -91,7 +91,7 @@ class PluginSetup {
 	 *
 	 * @param array $migrator_classes Array of Command\InterfaceCommand classes.
 	 */
-	public static function register_migrators( $migrator_classes ) {
+	public static function register_migrators( array $migrator_classes ) {
 
 		foreach ( $migrator_classes as $migrator_class ) {
 			$migrator = $migrator_class::get_instance();

@@ -3,73 +3,42 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Exception;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Utils\Logger;
 use Newspack\MigrationTools\Util\MigrationMeta;
 use WP_CLI;
-use WP_CLI\ExitException;
 use WP_Post;
 
-class ZocaloMigrator implements InterfaceCommand {
+class ZocaloMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	private int $default_author_id;
 
 	private CoAuthorsPlusHelper $coauthorsplus_logic;
 	private Logger $logger;
 
+	/**
+	 * Constructor.
+	 */
 	private function __construct() {
-		// Nothing.
-	}
-
-	/**
-	 * Get Singleton.
-	 *
-	 * @return self
-	 */
-	public static function get_instance(): self {
-		static $instance = null;
-		if ( null === $instance ) {
-			$instance = new self();
-		}
-
-		return $instance;
-	}
-
-	/**
-	 * Do some quick sanity checks and setup before running the commands.
-	 *
-	 * @throws ExitException
-	 */
-	public function preflight(): void {
-		static $has_run = false;
-		if ( $has_run ) {
-			// It looks like this gets called at least more than once pr. run, so bail if we already ran.
-			return;
-		}
-
 		$this->coauthorsplus_logic = new CoAuthorsPlusHelper();
 		$this->logger              = new Logger();
-
-		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
-			WP_CLI::error( '"Co-Authors Plus" plugin not found. Install and activate it before using the migration commands.' );
-		}
-
-		$has_run = true;
 	}
 
 	/**
 	 * @throws Exception
 	 */
-	public function register_commands(): void {
+	public static function register_commands(): void {
 		$generic_args = [
 			'synopsis'      => '[--post-id=<post-id>] [--dry-run] [--num-items=<num-items>] [--refresh-existing]',
-			'before_invoke' => [ $this, 'preflight' ],
 		];
 
 		WP_CLI::add_command(
 			'newspack-content-migrator zps-import-post-authors',
-			[ $this, 'cmd_import_post_authors' ],
+			self::get_command_closure( 'cmd_import_post_authors' ),
 			[
 				...$generic_args,
 				'shortdesc' => 'Import authors from ACF data on posts.',
@@ -78,7 +47,7 @@ class ZocaloMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator zps-import-sub-titles',
-			[ $this, 'cmd_import_sub_titles' ],
+			self::get_command_closure( 'cmd_import_sub_titles' ),
 			[
 				...$generic_args,
 				'shortdesc' => 'Import post sub-titles.',

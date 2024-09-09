@@ -2,20 +2,16 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \NewspackCustomContentMigrator\Logic\Posts;
 use \NewspackCustomContentMigrator\Logic\Taxonomy;
 use stdClass;
 use \WP_CLI;
 
-class TaxonomyMigrator implements InterfaceCommand {
+class TaxonomyMigrator implements RegisterCommandInterface {
 
-	/**
-	 * Instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
+	use WpCliCommandTrait;
 
 	/**
 	 * @var Posts $posts_logic
@@ -49,26 +45,12 @@ class TaxonomyMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator terms-with-taxonomy-to-categories',
-			array( $this, 'cmd_terms_with_taxonomy_to_categories' ),
+			self::get_command_closure( 'cmd_terms_with_taxonomy_to_categories' ),
 			[
 				'shortdesc' => 'Converts Terms with a specified Taxonomy to Categories, and assigns these Categories to belonging post records of all post_types (not just Posts and Pages).',
 				'synopsis'  => [
@@ -98,7 +80,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator terms-with-taxonomy-to-tags',
-			array( $this, 'cmd_terms_with_taxonomy_to_tags' ),
+			self::get_command_closure( 'cmd_terms_with_taxonomy_to_tags' ),
 			[
 				'shortdesc' => 'Converts Terms with a specified Taxonomy to Tags, and assigns these Tags to belonging post records of all post_types (not just Posts and Pages).',
 				'synopsis'  => [
@@ -122,7 +104,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator fix-taxonomy-count',
-			[ $this, 'cmd_fix_taxonomy_count' ],
+			self::get_command_closure( 'cmd_fix_taxonomy_count' ),
 			[
 				'shortdesc' => 'This command will fix wp_term_taxonomy.count for given taxonomies.',
 				'synopsis'  => [
@@ -146,7 +128,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator fix-category-and-tag-count',
-			[ $this, 'cmd_fix_category_and_tag_count' ],
+			self::get_command_closure( 'cmd_fix_category_and_tag_count' ),
 			[
 				'shortdesc' => 'This command will fix wp_term_taxonomy.count for categories and tags.',
 				'synopsis'  => [
@@ -163,7 +145,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator cull-low-value-tags',
-			[ $this, 'cmd_cull_low_value_tags' ],
+			self::get_command_closure( 'cmd_cull_low_value_tags' ),
 			[
 				'shortdesc' => 'This command will delete any tags which are below a certain threshold.',
 				'synopsis'  => [
@@ -188,7 +170,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator merge-terms',
-			[ $this, 'merge_terms_driver' ],
+			self::get_command_closure( 'merge_terms_driver' ),
 			[
 				'shortdesc' => 'Will merge any two terms into one record.',
 				'synopsis'  => [
@@ -242,7 +224,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator move-category-tree',
-			[ $this, 'cmd_move_category_tree' ],
+			self::get_command_closure( 'cmd_move_category_tree' ),
 			[
 				'shortdesc' => 'Will take a category tree (any Category, either root category or some child category, together with its child categories) and completely move it under a different parent. Any content belonging to categories in that tree get updated.',
 				'synopsis'  => [
@@ -266,7 +248,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator move-content-from-one-term-to-another',
-			[ $this, 'cmd_move_content_from_one_term_to_another' ],
+			self::get_command_closure( 'cmd_move_content_from_one_term_to_another' ),
 			[
 				'shortdesc' => 'Moves all content from one term to a different one on the same taxonomy.',
 				'synopsis'  => [
@@ -297,7 +279,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator split-duplicate-term-slugs',
-			[ $this, 'cmd_split_duplicate_term_slugs' ],
+			self::get_command_closure( 'cmd_split_duplicate_term_slugs' ),
 			[
 				'shortdesc' => 'Splits duplicate term slugs into separate terms.',
 				'synopsis'  => [

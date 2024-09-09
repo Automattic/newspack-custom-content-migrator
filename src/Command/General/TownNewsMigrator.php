@@ -2,7 +2,8 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
@@ -11,15 +12,12 @@ use \DirectoryIterator;
 use \SimpleXMLElement;
 use \WP_CLI;
 
-class TownNewsMigrator implements InterfaceCommand {
+class TownNewsMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 	const LOG_FILE                       = 'townnews_importer.log';
 	const TOWN_NEWS_ORIGINAL_ID_META_KEY = '_newspack_import_id';
 	const DEFAULT_CO_AUTHOR_DISPLAY_NAME = 'Staff';
-
-	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
 
 	/**
 	 * @var Logger.
@@ -54,26 +52,12 @@ class TownNewsMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator town-news-migrate-content',
-			array( $this, 'cmd_migrate_content' ),
+			self::get_command_closure( 'cmd_migrate_content' ),
 			[
 				'shortdesc' => 'Migrate TownNews content. It is recommended to run this command by feeding it one yyyy/ folder at a time.',
 				'synopsis'  => [
@@ -97,7 +81,7 @@ class TownNewsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator town-news-migrate-featured-tag',
-			array( $this, 'cmd_migrate_featured_tag' ),
+			self::get_command_closure( 'cmd_migrate_featured_tag' ),
 			[
 				'shortdesc' => 'Migrate TownNews post featured tag.',
 				'synopsis'  => [
@@ -114,7 +98,7 @@ class TownNewsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator town-news-fix-tags',
-			array( $this, 'cmd_fix_tags' ),
+			self::get_command_closure( 'cmd_fix_tags' ),
 			[
 				'shortdesc' => 'Fix tags.',
 				'synopsis'  => [

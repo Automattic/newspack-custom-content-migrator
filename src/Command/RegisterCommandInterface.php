@@ -17,4 +17,12 @@ interface RegisterCommandInterface {
 	 * @throws Exception If the command registration fails.
 	 */
 	public static function register_commands(): void;
+
+	/**
+	 * Get the instance of the class.
+	 *
+	 * @return self
+	 */
+	public static function get_instance(): self;
+
 }

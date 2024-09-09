@@ -2,22 +2,19 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Command\General\PostsMigrator;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \NewspackCustomContentMigrator\Logic\Ads;
 use \WP_CLI;
 
-class AdsMigrator implements InterfaceCommand {
+class AdsMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * @var string Ad Units.
 	 */
 	const AD_UNITS_EXPORT_FILE = 'newspack-ad-units.xml';
-
-	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
 
 	/**
 	 * @var Ads
@@ -32,24 +29,10 @@ class AdsMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class;
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator export-ads', array( $this, 'cmd_export_ads' ), [
+	public static function register_commands(): void {
+		WP_CLI::add_command( 'newspack-content-migrator export-ads', self::get_command_closure( 'cmd_export_ads' ), [
 			'shortdesc' => 'Exports Newspack Ads configuration.',
 			'synopsis'  => [
 				[
@@ -62,7 +45,7 @@ class AdsMigrator implements InterfaceCommand {
 			],
 		] );
 
-		WP_CLI::add_command( 'newspack-content-migrator import-ads', array( $this, 'cmd_import_ads' ), [
+		WP_CLI::add_command( 'newspack-content-migrator import-ads', self::get_command_closure( 'cmd_import_ads' ), [
 			'shortdesc' => 'Imports Newspack Ads.',
 			'synopsis'  => [
 				[

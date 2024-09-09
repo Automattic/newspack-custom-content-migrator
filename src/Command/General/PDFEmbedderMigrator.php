@@ -2,25 +2,22 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
 use \WP_CLI;
 
 /**
  * Custom migration scripts for PDF Embedder plugin.
  */
-class PDFEmbedderMigrator implements InterfaceCommand {
-	const PDF_EMBEDDER_LOG = 'PDF_EMBEDDER.log';
+class PDFEmbedderMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * @var PostsLogic.
 	 */
-	private $posts_logic = null;
-
-	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
+	private $posts_logic;
 
 	/**
 	 * Constructor.
@@ -30,26 +27,12 @@ class PDFEmbedderMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator migrate-pdf-embedder-block-to-core-file-block',
-			array( $this, 'migrate_pdf_embedder_block_to_core_file_block' ),
+			self::get_command_closure( 'migrate_pdf_embedder_block_to_core_file_block' ),
 			array(
 				'shortdesc' => 'Migrate PDF Embedder Block to Core File Block.',
 				'synopsis'  => array(),
@@ -60,7 +43,7 @@ class PDFEmbedderMigrator implements InterfaceCommand {
 	/**
 	 * Callable for `newspack-content-migrator migrate-pdf-embedder-block-to-core-file-block`.
 	 */
-	public function migrate_pdf_embedder_block_to_core_file_block() {
+	public function migrate_pdf_embedder_block_to_core_file_block( array $pos_args, array $assoc_args ): void {
 		$this->posts_logic->throttled_posts_loop(
 			array(
 				'post_type'   => 'post',

@@ -7,7 +7,8 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Utils\BatchLogic;
@@ -18,7 +19,9 @@ use \WP_CLI;
 /**
  * Attachments general Migrator command class.
  */
-class AttachmentsMigrator implements InterfaceCommand {
+class AttachmentsMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 	// Logs.
 	const S3_ATTACHMENTS_URLS_LOG = 'S3_AHTTACHMENTS_URLS.log';
 	const DELETING_MEDIA_LOGS     = 'DELETING_MEDIA_LOGS.log';
@@ -54,38 +57,17 @@ class AttachmentsMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
+	 * {@inheritDoc}
 	 */
-	private static $instance = null;
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-get-ids-by-years',
-			[ $this, 'cmd_get_atts_by_years' ],
+			self::get_command_closure( 'cmd_get_atts_by_years' ),
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-switch-local-images-urls-to-s3-urls',
-			[ $this, 'cmd_switch_local_images_urls_to_s3_urls' ],
+			self::get_command_closure( 'cmd_switch_local_images_urls_to_s3_urls' ),
 			[
 				'shortdesc' => 'In all post_content it updates images URLs from local URLs to S3 bucket based URLs.',
 				'synopsis'  => [
@@ -109,7 +91,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-delete-posts-attachments',
-			[ $this, 'cmd_attachment_delete_posts_attachments' ],
+			self::get_command_closure( 'cmd_attachment_delete_posts_attachments' ),
 			[
 				'shortdesc' => "This command deletes only posts' attachments (just those attachments which belong to posts), and it works in two steps. "
 					. 'First we should run this command without the --confirm-deletion flag, and it will move the attachment files to a temporary folder. This is to double check and make sure we are not about to delete attachments that are still in use, and lets us QA the results first. '
@@ -157,7 +139,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-check-broken-images',
-			[ $this, 'cmd_check_broken_images' ],
+			self::get_command_closure( 'cmd_check_broken_images' ),
 			[
 				'shortdesc' => 'Check images with broken URLs in-story.',
 				'synopsis'  => [
@@ -198,7 +180,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-regenerate-media-thumbnails',
-			[ $this, 'cmd_regenerate_media_thumbnails' ],
+			self::get_command_closure( 'cmd_regenerate_media_thumbnails' ),
 			[
 				'shortdesc' => 'Regenerate media thumbnails in batches.',
 				'synopsis'  => [
@@ -224,7 +206,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-get-hosts-from-post-content',
-			[ $this, 'cmd_get_hosts_post_content' ],
+			self::get_command_closure( 'cmd_get_hosts_post_content' ),
 			[
 				'shortdesc' => 'Check images with broken URLs in-story.',
 				'synopsis'  => [],
@@ -232,7 +214,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-repair-img-blocks-w-no-id',
-			[ $this, 'cmd_repair_img_blocks_w_no_id' ],
+			self::get_command_closure( 'cmd_repair_img_blocks_w_no_id' ),
 			[
 				'shortdesc' => 'Repair image blocks with local images that have no ID and therefore are harder to edit for the user.',
 				'synopsis'  => [

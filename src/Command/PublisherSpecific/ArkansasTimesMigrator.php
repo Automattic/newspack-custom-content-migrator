@@ -7,7 +7,9 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\Logger;
@@ -16,7 +18,9 @@ use WP_CLI;
 /**
  * Custom migration scripts for Arkansas Times.
  */
-class ArkansasTimesMigrator implements InterfaceCommand {
+class ArkansasTimesMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 	/**
 	 * Logger.
 	 */
@@ -42,26 +46,12 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton.
-	 *
-	 * @return ArkansasTimesMigrator
+	 * {@inheritDoc}
 	 */
-	public static function get_instance(): self {
-		static $instance = null;
-		if ( null === $instance ) {
-			$instance = new self();
-		}
-
-		return $instance;
-	}
-
-	/**
-	 * Register WP CLI commands.
-	 */
-	public function register_commands(): void {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator arkansastimes-migrate-issues-from-cpt-to-posts',
-			[ $this, 'cmd_migrate_issues_from_cpt_to_posts' ],
+			self::get_command_closure( 'cmd_migrate_issues_from_cpt_to_posts' ),
 			[
 				'shortdesc' => 'Migrates Issues from CPT to Regular Posts with Issues Category',
 			]
@@ -69,7 +59,7 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator arkansastimes-migrate-attachments-media-credits',
-			[ $this, 'cmd_migrate_attachments_media_credits' ],
+			self::get_command_closure( 'cmd_migrate_attachments_media_credits' ),
 			[
 				'shortdesc' => 'Migrates Attachments media credits from ACF to Newspack Plugin',
 			]
@@ -77,7 +67,7 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator arkansastimes-migrate-youtube-embeds',
-			[ $this, 'cmd_migrate_youtube_embeds' ],
+			self::get_command_closure( 'cmd_migrate_youtube_embeds' ),
 			[
 				'shortdesc' => 'Migrates YouTube Embeds from paragraph blocks to YouTube Embed blocks',
 			]
@@ -87,7 +77,7 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 	/**
 	 * Migrates Issues from CPT to Regular Posts with Issues Category.
 	 */
-	public function cmd_migrate_issues_from_cpt_to_posts(): void {
+	public function cmd_migrate_issues_from_cpt_to_posts( array $pos_args, array $assoc_args): void {
 		// Logs.
 		$log = 'arkansastimes-issues-cpt-to-posts.log';
 
@@ -382,7 +372,7 @@ class ArkansasTimesMigrator implements InterfaceCommand {
 	/**
 	 * Migrates YouTube Embeds from paragraph blocks to YouTube Embed blocks.
 	 */
-	public function cmd_migrate_youtube_embeds() {
+	public function cmd_migrate_youtube_embeds( array $pos_args, array $assoc_args ) {
 		// Logs.
 		$log = 'arkansastimes-migrate-youtube-embeds.log';
 

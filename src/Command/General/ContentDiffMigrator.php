@@ -7,7 +7,8 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\ContentDiffMigrator as ContentDiffMigratorLogic;
 use NewspackCustomContentMigrator\Utils\PHP as PHPUtil;
 use WP_CLI;
@@ -17,7 +18,9 @@ use WP_CLI;
  *
  * @package NewspackCustomContentMigrator\Command\General
  */
-class ContentDiffMigrator implements InterfaceCommand {
+class ContentDiffMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	const LOG_IDS_CSV                     = 'content-diff__new-ids-csv.log';
 	const LOG_IDS_MODIFIED                = 'content-diff__modified-ids.log';
@@ -30,18 +33,11 @@ class ContentDiffMigrator implements InterfaceCommand {
 	const LOG_RECREATED_CATEGORIES        = 'content-diff__recreated_categories.log';
 
 	/**
-	 * Instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
-	/**
 	 * Content Diff logic class.
 	 *
-	 * @var null|ContentDiffMigratorLogic Logic.
+	 * @var ContentDiffMigratorLogic Logic.
 	 */
-	private static $logic = null;
+	private static ContentDiffMigratorLogic $logic;
 
 	/**
 	 * Prefix of tables from the live DB, which are imported next to local WP tables.
@@ -92,36 +88,14 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 */
 	private $log_updated_blocks_ids;
 
-	/**
-	 * Constructor.
-	 */
-	private function __construct() {
-	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			global $wpdb;
-
-			self::$logic    = new ContentDiffMigratorLogic( $wpdb );
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator content-diff-search-new-content-on-live',
-			[ $this, 'cmd_search_new_content_on_live' ],
+			self::get_command_closure('cmd_search_new_content_on_live' ),
 			[
 				'shortdesc' => 'Searches for new posts existing in the Live site tables and not in the local site tables, and exports the IDs to a file.',
 				'synopsis'  => [
@@ -151,7 +125,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator content-diff-migrate-live-content',
-			[ $this, 'cmd_migrate_live_content' ],
+			self::get_command_closure('cmd_migrate_live_content' ),
 			[
 				'shortdesc' => 'Migrates content from Live site tables to local site tables.',
 				'synopsis'  => [
@@ -175,7 +149,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator content-diff-fix-image-ids-in-post-content',
-			[ $this, 'cmd_fix_image_ids_in_post_content' ],
+			self::get_command_closure('cmd_fix_image_ids_in_post_content' ),
 			[
 				'shortdesc' => 'Standalone command which fixes attachment IDs in Block content. It does so by loading all the posts, goes through post_content and gets all the WP Blocks which use attachments IDs (see \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_blocks_ids), then it takes every single attachment file and checks if its attachment ID has changed, and if it has it updates the IDs.',
 				'synopsis'  => [
@@ -206,7 +180,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator display-collations-comparison',
-			[ $this, 'cmd_compare_collations_of_live_and_core_wp_tables' ],
+			self::get_command_closure('cmd_compare_collations_of_live_and_core_wp_tables' ),
 			[
 				'shortdesc' => 'Display a table comparing collations of Live and Core WP tables.',
 				'synopsis'  => [
@@ -236,7 +210,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator correct-collations-for-live-wp-tables',
-			[ $this, 'cmd_correct_collations_for_live_wp_tables' ],
+			self::get_command_closure('cmd_correct_collations_for_live_wp_tables' ),
 			[
 				'shortdesc' => 'This command will handle the necessary operations to match collations across Live and Core WP tables',
 				'synopsis'  => [
@@ -282,7 +256,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator content-diff-update-featured-images-ids',
-			[ $this, 'cmd_update_feat_images_ids' ],
+			self::get_command_closure('cmd_update_feat_images_ids' ),
 			[
 				'shortdesc' => 'A helper/fixer command which can be run on any site to pick up and update leftover featured image IDs. Fix to a previous bug that ignored some _thumbnail_ids. It automatically picks up "old_attachment_ids"=>"new_attachment_ids" from DB and updates those (unless provided with an optional --attachment-ids-json-file).',
 				'synopsis'  => [

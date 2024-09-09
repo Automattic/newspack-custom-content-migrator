@@ -4,7 +4,8 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use DateTimeImmutable;
 use DateTimeZone;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockManipulator;
@@ -14,37 +15,11 @@ use WP_CLI;
 use WP_CLI\ExitException;
 use WP_Post;
 
-class CarsonNowMigrator implements InterfaceCommand {
+class CarsonNowMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	const SKIP_IMPORTING_POST = [];
-
-	private array $refresh_existing_arg = [
-		'type'        => 'flag',
-		'name'        => 'refresh-existing',
-		'description' => 'Will refresh existing content rather than create new',
-		'optional'    => true,
-	];
-
-	private array $num_posts_arg = [
-		'type'        => 'assoc',
-		'name'        => 'num-posts',
-		'description' => 'Number of posts to process',
-		'optional'    => true,
-	];
-
-	private array $max_post_id_arg = [
-		'type'        => 'assoc',
-		'name'        => 'max-post-id',
-		'description' => 'Maximum post ID to include in run (inclusive).',
-		'optional'    => true,
-	];
-
-	private array $min_post_id_arg = [
-		'type'        => 'assoc',
-		'name'        => 'min-post-id',
-		'description' => 'Minimum post ID to include in run (inclusive).',
-		'optional'    => true,
-	];
 
 	/**
 	 * @var DateTimeZone
@@ -69,84 +44,10 @@ class CarsonNowMigrator implements InterfaceCommand {
 	 */
 	private $reader_content_cutoff_date;
 
-	private function __construct() {
-	}
-
-	public static function get_instance(): self {
-		static $instance = null;
-
-		if ( null === $instance ) {
-			$instance = new self();
-		}
-
-		return $instance;
-	}
-
-	public function add_fg_hooks(): void {
-		// Mappings and pre-registration.
-		add_filter( 'fgd2wp_map_taxonomy', [ $this, 'fg_filter_map_taxonomy' ], 11, 3 );
-		add_filter( 'fgd2wp_get_node_types', [ $this, 'fg_filter_get_node_types' ], 11, 1 );
-		add_filter( 'fgd2wp_pre_register_post_type', [ $this, 'fg_filter_fgd2wp_pre_register_post_type' ], 11, 3 );
-
-		// Massaging the data before inserting.
-		add_filter( 'fgd2wp_pre_insert_post', [ $this, 'pre_insert_reader_content' ], 11, 2 );
-		add_filter( 'fgd2wp_pre_insert_post', [ $this, 'pre_insert_with_event_date' ], 12, 2 );
-		add_filter( 'fgd2wp_pre_insert_post', [ $this, 'pre_insert_set_post_author' ], 15, 2 );
-
-		// Actions
-		add_action( 'fgd2wp_post_insert_post', [ $this, 'fg_action_fgd2wp_post_insert_post' ], 11, 5 );
-	}
-
-	/**
-	 * @throws \Exception
-	 */
-	public function register_commands(): void {
-
-		WP_CLI::add_command(
-			'newspack-content-migrator cn-wrap-import',
-			[ $this, 'cmd_wrap_drupal_import' ],
-			[
-				'shortdesc'     => 'Wrap the import command from FG Drupal.',
-				'synopsis'      => [],
-				'before_invoke' => [ $this, 'preflight' ],
-			]
-		);
-
-		WP_CLI::add_command(
-			'newspack-content-migrator cn-add-inline-bylines',
-			[ $this, 'cmd_add_inline_bylines' ],
-			[
-				'shortdesc'     => 'Add inline bylines.',
-				'synopsis'      => [
-					$this->refresh_existing_arg,
-					$this->num_posts_arg,
-					$this->min_post_id_arg,
-					$this->max_post_id_arg,
-				],
-				'before_invoke' => [ $this, 'preflight' ],
-			]
-		);
-
-		WP_CLI::add_command(
-			'newspack-content-migrator cn-import-images',
-			[ $this, 'cmd_import_images' ],
-			[
-				'shortdesc'     => 'Import images.',
-				'synopsis'      => [
-					$this->refresh_existing_arg,
-					$this->num_posts_arg,
-					$this->min_post_id_arg,
-					$this->max_post_id_arg,
-				],
-				'before_invoke' => [ $this, 'preflight' ],
-			]
-		);
-	}
-
 	/**
 	 * @throws ExitException
 	 */
-	public function preflight(): void {
+	private function __construct() {
 		$this->reader_content_cutoff_date = DateTimeImmutable::createFromFormat( self::DRUPAL_DATE_FORMAT, '2023-01-01T00:00:00' );
 		$this->logger                     = new Logger();
 		$this->gutenberg_block_generator  = new GutenbergBlockGenerator();
@@ -154,13 +55,6 @@ class CarsonNowMigrator implements InterfaceCommand {
 
 		$this->utc_timezone  = new DateTimeZone( 'UTC' );
 		$this->site_timezone = new DateTimeZone( 'America/Los_Angeles' );
-
-		static $checked = false;
-
-		if ( $checked ) {
-			// It looks like this gets called at least more than once pr. run, so bail if we already checked.
-			return;
-		}
 
 		$required_plugins = [
 			'newspack-listings',
@@ -184,8 +78,92 @@ class CarsonNowMigrator implements InterfaceCommand {
 		if ( ! defined( 'NCCM_SOURCE_WEBSITE_URL' ) ) {
 			WP_CLI::error( 'NCCM_SOURCE_WEBSITE_URL is not defined in wp-config.php' );
 		}
+	}
 
-		$checked = true;
+	public function add_fg_hooks(): void {
+		// Mappings and pre-registration.
+		add_filter( 'fgd2wp_map_taxonomy', [ $this, 'fg_filter_map_taxonomy' ], 11, 3 );
+		add_filter( 'fgd2wp_get_node_types', [ $this, 'fg_filter_get_node_types' ], 11, 1 );
+		add_filter( 'fgd2wp_pre_register_post_type', [ $this, 'fg_filter_fgd2wp_pre_register_post_type' ], 11, 3 );
+
+		// Massaging the data before inserting.
+		add_filter( 'fgd2wp_pre_insert_post', [ $this, 'pre_insert_reader_content' ], 11, 2 );
+		add_filter( 'fgd2wp_pre_insert_post', [ $this, 'pre_insert_with_event_date' ], 12, 2 );
+		add_filter( 'fgd2wp_pre_insert_post', [ $this, 'pre_insert_set_post_author' ], 15, 2 );
+
+		// Actions
+		add_action( 'fgd2wp_post_insert_post', [ $this, 'fg_action_fgd2wp_post_insert_post' ], 11, 5 );
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	public static function register_commands(): void {
+
+		$refresh_existing_arg = [
+			'type'        => 'flag',
+			'name'        => 'refresh-existing',
+			'description' => 'Will refresh existing content rather than create new',
+			'optional'    => true,
+		];
+
+		$num_posts_arg = [
+			'type'        => 'assoc',
+			'name'        => 'num-posts',
+			'description' => 'Number of posts to process',
+			'optional'    => true,
+		];
+
+		$max_post_id_arg = [
+			'type'        => 'assoc',
+			'name'        => 'max-post-id',
+			'description' => 'Maximum post ID to include in run (inclusive).',
+			'optional'    => true,
+		];
+
+		$min_post_id_arg = [
+			'type'        => 'assoc',
+			'name'        => 'min-post-id',
+			'description' => 'Minimum post ID to include in run (inclusive).',
+			'optional'    => true,
+		];
+
+		WP_CLI::add_command(
+			'newspack-content-migrator cn-wrap-import',
+			self::get_command_closure( 'cmd_wrap_drupal_import' ),
+			[
+				'shortdesc'     => 'Wrap the import command from FG Drupal.',
+				'synopsis'      => [],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator cn-add-inline-bylines',
+			self::get_command_closure( 'cmd_add_inline_bylines' ),
+			[
+				'shortdesc'     => 'Add inline bylines.',
+				'synopsis'      => [
+					$refresh_existing_arg,
+					$num_posts_arg,
+					$min_post_id_arg,
+					$max_post_id_arg,
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator cn-import-images',
+			self::get_command_closure( 'cmd_import_images' ),
+			[
+				'shortdesc'     => 'Import images.',
+				'synopsis'      => [
+					$refresh_existing_arg,
+					$num_posts_arg,
+					$min_post_id_arg,
+					$max_post_id_arg,
+				],
+			]
+		);
 	}
 
 	/**

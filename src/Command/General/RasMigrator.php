@@ -2,8 +2,8 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use WP_CLI;
 use Newspack\Reader_Activation;
 use Newspack_Segments_Model;
@@ -12,39 +12,18 @@ use Newspack_Popups_Model;
 /**
  * Profile Press reusable commands.
  */
-class Ras implements InterfaceCommand
-{
+class RasMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
     /**
-     * Instance.
-     *
-     * @var null|InterfaceCommand Instance.
+     * {@inheritDoc}
      */
-    private static $instance = null;
-
-    /**
-     * Sets up Co-Authors Plus plugin dependencies.
-     *
-     * @return InterfaceCommand|null
-     */
-    public static function get_instance()
-    {
-        $class = get_called_class();
-        if (null === self::$instance) {
-            self::$instance = new $class();
-        }
-
-        return self::$instance;
-    }
-
-    /**
-     * See InterfaceCommand::register_commands.
-     */
-    public function register_commands()
+    public static function register_commands(): void
     {
         WP_CLI::add_command(
             'newspack-content-migrator ras-campaign-migrator',
-            [$this, 'cmd_ras_campaign_migrator'],
+	        self::get_command_closure( 'cmd_ras_campaign_migrator'),
             [
                 'shortdesc' => 'Imports Campaigns and checks the last item in the RAS wizard, activating RAS at the end.',
             ]

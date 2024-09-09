@@ -11,7 +11,8 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper as CoAuthorPlusLogic;
 use NewspackCustomContentMigrator\Utils\Logger;
@@ -21,7 +22,9 @@ use WP_Error;
 /**
  * Custom migration scripts for Ghost CMS.
  */
-class GhostCMSMigrator implements InterfaceCommand {
+class GhostCMSMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * AttachmentsLogic
@@ -52,13 +55,6 @@ class GhostCMSMigrator implements InterfaceCommand {
 	 * @var string ghost_url
 	 */
 	private string $ghost_url;
-
-	/**
-	 * Instance
-	 * 
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
 
 	/**
 	 * JSON from file
@@ -100,27 +96,13 @@ class GhostCMSMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator ghost-cms-import',
-			[ $this, 'cmd_ghost_cms_import' ],
+			self::get_command_closure( 'cmd_ghost_cms_import' ),
 			[
 				'shortdesc' => 'Import content from Ghost JSON export.',
 				'synopsis'  => array(

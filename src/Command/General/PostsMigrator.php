@@ -517,7 +517,7 @@ class PostsMigrator implements RegisterCommandInterface {
 	 * @param array $args
 	 * @param array $assoc_args
 	 */
-	public function cmd_delete_export_postmeta() {
+	public function cmd_delete_export_postmeta( array $pos_args, array $assoc_args ): void {
 		WP_CLI::line( sprintf( 'Deleting %s postmeta from all ther posts and pages...', self::META_KEY_ORIGINAL_ID ) );
 
 		$args  = array(

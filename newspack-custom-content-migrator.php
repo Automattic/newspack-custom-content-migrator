@@ -28,12 +28,6 @@ PluginSetup::register_command_classes(
 	[
 		Command\General\CssMigrator::class,
 		Command\General\PostsMigrator::class,
-	]
-);
-
-PluginSetup::register_migrators(
-	array(
-		// General.
 		Command\General\MetaToContentMigrator::class,
 		Command\General\MenusMigrator::class,
 		Command\General\ContentConverterPluginMigrator::class,
@@ -53,6 +47,7 @@ PluginSetup::register_migrators(
 		Command\General\ReusableBlocksMigrator::class,
 		Command\General\SportsPressMigrator::class,
 		Command\General\FeaturedImagesMigrator::class,
+		Command\General\FixMissingMedia::class,
 		Command\General\ContentDiffMigrator::class,
 		Command\General\WooCommOrdersAndSubscriptionsMigrator::class,
 		Command\General\NextgenGalleryMigrator::class,
@@ -67,8 +62,8 @@ PluginSetup::register_migrators(
 		Command\General\PrelaunchSiteQAMigrator::class,
 		Command\General\VillageMediaCMSMigrator::class,
 		Command\General\MetroMigrator::class,
-		Command\General\ProfilePress::class,
-		Command\General\Ras::class,
+		Command\General\ProfilePressMigrator::class,
+		Command\General\RasMigrator::class,
 		Command\General\TownNewsMigrator::class,
 		Command\General\UsersMigrator::class,
 		Command\General\EmbarcaderoMigrator::class,
@@ -86,10 +81,21 @@ PluginSetup::register_migrators(
 		Command\General\SimplyGuestAuthorNameMigrator::class,
 		Command\General\TagDivThemesPluginsMigrator::class,
 		Command\General\GhostCMSMigrator::class,
+	]
+);
 
-		// Publisher specific, remove when launched.
+PluginSetup::register_command_classes(
+	// Publisher specific commands. Remove from the array below when launched.
+	[
 		Command\PublisherSpecific\CarsonNowMigrator::class,
 		Command\PublisherSpecific\ArkansasTimesMigrator::class,
 		Command\PublisherSpecific\ZocaloMigrator::class,
-	)
+	]
+);
+
+PluginSetup::register_migrators(
+	[
+	// If you need support for classes that are in the ./publisher-specific-archive/ directory, you can try adding them here temporarily.
+	// Ideally the class you put there should be refactored to implement the RegisterCommandInterface, and then you can include it (temporarily) in the array above.
+	]
 );

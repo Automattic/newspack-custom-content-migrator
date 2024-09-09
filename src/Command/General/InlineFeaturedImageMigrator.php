@@ -2,25 +2,20 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\Logic\Posts as PostLogic;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
-use WP_Query;
 use Symfony\Component\DomCrawler\Crawler;
 
 /**
  * InlineFeaturedImageMigrator.
  */
-class InlineFeaturedImageMigrator implements InterfaceCommand {
+class InlineFeaturedImageMigrator implements RegisterCommandInterface {
 
-	/**
-	 * Instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
+	use WpCliCommandTrait;
 
 	/**
 	 * PostLogic Instance.
@@ -61,26 +56,12 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator remove-featured-images-from-beginning-of-postcontent',
-			[ $this, 'cmd_remove_featured_images_from_beginning_of_postcontent' ],
+			self::get_command_closure( 'cmd_remove_featured_images_from_beginning_of_postcontent' ),
 			[
 				'shortdesc' => 'Goes through all the Posts, and removes all occurrences of featured image from beginning of Post content.',
 				'synopsis'  => [
@@ -96,7 +77,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator set-first-image-from-content-as-featured-image',
-			[ $this, 'cmd_set_first_image_from_content_as_featured_image' ],
+			self::get_command_closure( 'cmd_set_first_image_from_content_as_featured_image' ),
 			[
 				'shortdesc' => "Runs through all the Posts, and in case it doesn't have a featured image, finds the first <img> element in Post content and sets it as featured image.",
 				'synopsis'  => [
@@ -119,7 +100,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator hide-featured-image-if-used-in-post-content',
-			[ $this, 'cmd_hide_featured_image_if_used_in_post_content' ],
+			self::get_command_closure( 'cmd_hide_featured_image_if_used_in_post_content' ),
 			[
 				'shortdesc' => 'Hides featured image for post if that same image is used in post_content. By default it hides the featured image only if that same image is used at the very beginning of post_content. Optionally, if --anywhere-in-post-content flag is used, it hides the featured image if that same image is used anywhere in post_content.',
 				'synopsis'  => [
@@ -164,7 +145,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator hide-all-featured-images',
-			[ $this, 'cmd_hide_all_featured_images' ],
+			self::get_command_closure( 'cmd_hide_all_featured_images' ),
 			[
 				'shortdesc' => 'Hide ALL featured image.',
 			]

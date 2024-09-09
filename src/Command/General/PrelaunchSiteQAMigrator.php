@@ -8,22 +8,17 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Exception;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Command\General\AttachmentsMigrator;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Utils\Logger;
 use \WP_CLI;
 
 /**
  * General Prelaunch QA migrator
  */
-class PrelaunchSiteQAMigrator implements InterfaceCommand {
+class PrelaunchSiteQAMigrator implements RegisterCommandInterface {
 
-	/**
-	 * Instance of the class
-	 * 
-	 * @var null|InterfaceCommand
-	 */
-	private static $instance = null;
+	use WpCliCommandTrait;
 
 	/**
 	 * Instance of Logger
@@ -74,26 +69,12 @@ class PrelaunchSiteQAMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator prelaunchsiteqamigrator-run-qa',
-			[ $this, 'cmd_run_qa' ],
+			self::get_command_closure( 'cmd_run_qa' ),
 			[
 				'shortdesc' => 'Run all QA commands to make sure everything is correct before launching.',
 				'synopsis'  => [

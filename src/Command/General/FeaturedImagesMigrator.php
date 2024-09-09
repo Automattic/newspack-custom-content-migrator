@@ -2,40 +2,19 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \WP_CLI;
 
-class FeaturedImagesMigrator implements InterfaceCommand {
-	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
+class FeaturedImagesMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
-	 * Constructor.
+	 * {@inheritDoc}
 	 */
-	private function __construct() {
-	}
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator set-featured-images-from-first-image', array( $this, 'cmd_set_featured_images_from_first_image' ) );
+	public static function register_commands(): void {
+		WP_CLI::add_command( 'newspack-content-migrator set-featured-images-from-first-image', self::get_command_closure( 'cmd_set_featured_images_from_first_image' ) );
 	}
 
 	/**
