@@ -513,6 +513,10 @@ class ContentDiffMigrator implements InterfaceCommand {
 		if ( empty( $all_live_posts_ids ) ) {
 			WP_CLI::error( sprintf( 'File %s does not contain valid CSV IDs.', $file_ids_csv ) );
 		}
+		// Disable CAP's "author" taxonomy.
+		if ( in_array( 'author', $taxonomies_to_migrate ) ) {
+			WP_CLI::error( "CAP's 'author' taxonomy is not supported at this point as CAP data requires a dedicated migrator for its complexity and special cases. Please remove 'author' it from the list of taxonomies to migrate and re-run the command." );
+		}
 
 		// In case some custom taxonomies were provided, but category or post_tag were not among those, warn the user that they won't be migrated and ask for confirmation to continue.
 		if ( ! empty( $assoc_args['custom-taxonomies-csv'] ) ) {
