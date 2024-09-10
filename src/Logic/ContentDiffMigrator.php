@@ -546,7 +546,7 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Recreates all hierarchical taxonomies from Live to local.
+	 * Recreates all hierarchical or non-hierarchical taxonomies from Live to local.
 	 *
 	 * @param string $live_table_prefix Live DB table prefix.
 	 * @param array  $hierarchical_taxonomies_to_migrate Hierarchical taxonomies to migrate.
@@ -578,7 +578,26 @@ class ContentDiffMigrator {
 		// Go through all the $live_taxonomies and get or create them on local, and mark their term_id changes in $hierarchical_taxonomy_term_id_updates.
 		$hierarchical_taxonomy_term_id_updates = [];
 		foreach ( $live_hierarchical_taxonomies as $live_hierarchical_taxonomy ) {
-			$live_hierarchical_taxonomy_tree    = $this->get_hierarchical_taxonomy_tree( $live_table_prefix, $live_hierarchical_taxonomy, $hierarchical_taxonomies_to_migrate );
+			$live_hierarchical_taxonomy_tree = $this->get_hierarchical_taxonomy_tree( $live_table_prefix, $live_hierarchical_taxonomy );
+
+			// Register taxonomy if not already registered needed (init action not executed at this point, and it just needs to be register it for the purpose of this plugin).
+			if ( ! taxonomy_exists( $live_hierarchical_taxonomy_tree['taxonomy'] ) ) {
+				$registered_taxonomy = register_taxonomy(
+					$live_hierarchical_taxonomy_tree['taxonomy'],
+					'post',
+					[
+						'taxonomy'     => $live_hierarchical_taxonomy_tree['taxonomy'],
+						'description'  => $live_hierarchical_taxonomy_tree['taxonomy'],
+						'count'        => $live_hierarchical_taxonomy_tree['count'],
+						'public'       => true,
+						'hierarchical' => true,
+					]
+				);
+				if ( is_wp_error( $registered_taxonomy ) ) {
+					WP_CLI::error( 'Failed to register taxonomy ' . $live_hierarchical_taxonomy_tree['taxonomy'] . ' error: ' . $registered_taxonomy->get_error_message() );
+				}
+			}
+
 			$created_hierarchical_taxonomy_tree = $this->get_or_create_hierarchical_taxonomy_tree( $table_prefix, $live_hierarchical_taxonomy_tree );
 
 			$hierarchical_taxonomy_term_id_updates[ $live_hierarchical_taxonomy['term_id'] ] = $created_hierarchical_taxonomy_tree['term_id'];
@@ -602,7 +621,6 @@ class ContentDiffMigrator {
 	 *     @type string count       Hierarchical taxonomy count.
 	 *     @type string parent      Hierarchical taxonomy parent term_id.
 	 * }
-	 * @param array  $hierarchical_taxonomies_to_get Hierarchical taxonomies to get their trees.
 	 *
 	 * @return array {
 	 *     A nested array of hierarchical taxonomies, where 'parent' key is either another subarray hierarchical taxonomy, or '0' if no parent.
@@ -616,7 +634,7 @@ class ContentDiffMigrator {
 	 *     @type string|array parent      Either nested parent subarray hierarchical taxonomy containing all the same keys and values, or '0'.
 	 * }
 	 */
-	public function get_hierarchical_taxonomy_tree( $table_prefix, $hierarchical_taxonomy, $hierarchical_taxonomies_to_get ) {
+	public function get_hierarchical_taxonomy_tree( $table_prefix, $hierarchical_taxonomy ) {
 
 		$hierarchical_taxonomy_tree = $hierarchical_taxonomy;
 
@@ -644,7 +662,7 @@ class ContentDiffMigrator {
 			if ( 0 == $parent_row['parent'] ) {
 				$hierarchical_taxonomy_tree['parent'] = $parent_row;
 			} else {
-				$hierarchical_taxonomy_tree['parent'] = $this->get_hierarchical_taxonomy_tree( $table_prefix, $parent_row, $hierarchical_taxonomies_to_get );
+				$hierarchical_taxonomy_tree['parent'] = $this->get_hierarchical_taxonomy_tree( $table_prefix, $parent_row );
 			}
 		}
 
@@ -843,7 +861,7 @@ class ContentDiffMigrator {
 	 */
 	public function wp_insert_or_update_term( $term_name, $term_description, $term_parent, $taxonomy ) {
 		// Check if the term already exists.
-		$term_exists = term_exists( $term_name, $taxonomy, $term_parent );
+		$term_exists = term_exists( $term_name, $taxonomy, $term_parent ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.term_exists_term_exists
 
 		// If the term doesn't exist, insert it.
 		if ( ! $term_exists ) {
@@ -1037,6 +1055,7 @@ class ContentDiffMigrator {
 
 					// Create a new Term.
 					$term_insert_result = $this->wp_insert_term( $live_term_name, $live_term_taxonomy_row['taxonomy'], [ 'description' => $live_term_taxonomy_row['description'] ] );
+					
 					if ( is_wp_error( $term_insert_result ) ) {
 						$error_messages[] = sprintf(
 							"Error occurred while inserting %s '%s' live_term_id=%s at live_post_ID=%s :%s",
@@ -1046,9 +1065,16 @@ class ContentDiffMigrator {
 							$post_id,
 							$term_insert_result->get_error_message()
 						);
-
+						
 						continue;
 					}
+
+					/**
+					 * Update $hierarchical_taxonomy_term_id_updates which contains "old term ID" to "new term ID" (see this function's arguments in docblock for more info):
+					 *      - keys are old live hierarchical taxonomy term_ids
+					 *      - values are local (Staging) term_ids.
+					 */
+					$hierarchical_taxonomy_term_id_updates[ $live_term_taxonomy_row['term_id'] ] = $term_insert_result['term_id'];
 
 					$local_term_id             = $term_insert_result['term_id'];
 					$local_term_taxonomy_id    = $term_insert_result['term_taxonomy_id'];
@@ -1137,7 +1163,7 @@ class ContentDiffMigrator {
 		foreach ( $imported_post_ids as $new_post_id ) {
 
 			// Get Post's current _thumbnail_id.
-			// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- correctly prepared.
+			// phpcs:disable
 			$current_thumbnail_id = $this->wpdb->get_var(
 				$this->wpdb->prepare(
 					"SELECT meta_value
@@ -2684,7 +2710,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->posts, $insert_post_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting post, ID %d, post row %s', $orig_id, json_encode( $post_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error inserting post, ID %d, post row %s', $orig_id, json_encode( $post_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2707,7 +2733,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->postmeta, $insert_postmeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error in insert_postmeta_row, post_id %s, postmeta_row %s', $post_id, json_encode( $postmeta_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error in insert_postmeta_row, post_id %s, postmeta_row %s', $post_id, json_encode( $postmeta_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2730,7 +2756,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->users, $insert_user_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting user, ID %d, user_row %s', $user_row['ID'], json_encode( $user_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error inserting user, ID %d, user_row %s', $user_row['ID'], json_encode( $user_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		// Last inserted ID.
@@ -2766,7 +2792,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->usermeta, $insert_usermeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting user meta, user_id %d, $usermeta_row %s', $user_id, json_encode( $usermeta_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error inserting user meta, user_id %d, $usermeta_row %s', $user_id, json_encode( $usermeta_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2791,7 +2817,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->comments, $insert_comment_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting comment, $new_post_id %d, $new_user_id %d, $comment_row %s', $new_post_id, $new_user_id, json_encode( $comment_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error inserting comment, $new_post_id %d, $new_user_id %d, $comment_row %s', $new_post_id, $new_user_id, json_encode( $comment_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2814,7 +2840,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->commentmeta, $insert_commentmeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting comment meta, $new_comment_id %d, $commentmeta_row %s', $new_comment_id, json_encode( $commentmeta_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error inserting comment meta, $new_comment_id %d, $commentmeta_row %s', $new_comment_id, json_encode( $commentmeta_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2833,7 +2859,7 @@ class ContentDiffMigrator {
 	public function update_comment_parent( $comment_id, $comment_parent_new ) {
 		$updated = $this->wpdb->update( $this->wpdb->comments, [ 'comment_parent' => $comment_parent_new ], [ 'comment_ID' => $comment_id ] );
 		if ( 1 != $updated ) {
-			throw new \RuntimeException( sprintf( 'Error updating comment parent, $comment_id %d, $comment_parent_new %d', $comment_id, $comment_parent_new ) );
+			throw new \RuntimeException( sprintf( 'Error updating comment parent, $comment_id %d, $comment_parent_new %d', $comment_id, $comment_parent_new ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $updated;
@@ -2905,7 +2931,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->termmeta, $insert_termmeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting term meta, $term_id %d, $termmeta_row %s', $term_id, json_encode( $termmeta_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error inserting term meta, $term_id %d, $termmeta_row %s', $term_id, json_encode( $termmeta_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2930,7 +2956,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->term_taxonomy, $insert_term_taxonomy_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting term_taxonomy, $new_term_id %d, term_taxonomy_id %s', $new_term_id, json_encode( $term_taxonomy_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error inserting term_taxonomy, $new_term_id %d, term_taxonomy_id %s', $new_term_id, json_encode( $term_taxonomy_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2955,7 +2981,7 @@ class ContentDiffMigrator {
 			]
 		);
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting term relationship, $object_id %d, $term_taxonomy_id %d', $object_id, $term_taxonomy_id ) );
+			throw new \RuntimeException( sprintf( 'Error inserting term relationship, $object_id %d, $term_taxonomy_id %d', $object_id, $term_taxonomy_id ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2974,7 +3000,7 @@ class ContentDiffMigrator {
 	public function update_post_author( $post_id, $new_author_id ) {
 		$updated = $this->wpdb->update( $this->wpdb->posts, [ 'post_author' => $new_author_id ], [ 'ID' => $post_id ] );
 		if ( 1 != $updated ) {
-			throw new \RuntimeException( sprintf( 'Error updating post author, $post_id %d, $new_author_id %d', $post_id, $new_author_id ) );
+			throw new \RuntimeException( sprintf( 'Error updating post author, $post_id %d, $new_author_id %d', $post_id, $new_author_id ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $updated;
@@ -3011,7 +3037,7 @@ class ContentDiffMigrator {
 			}
 			$tablename = $table_prefix . $table;
 			if ( ! in_array( $tablename, $all_tables ) ) {
-				throw new \RuntimeException( sprintf( 'Core WP DB table %s not found.', $tablename ) );
+				throw new \RuntimeException( sprintf( 'Core WP DB table %s not found.', $tablename ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 			}
 		}
 	}
@@ -3126,7 +3152,7 @@ class ContentDiffMigrator {
 		$rename_result             = $this->wpdb->query( $rename_sql );
 
 		if ( is_wp_error( $rename_result ) ) {
-			throw new \RuntimeException( "Unable to rename table: '$rename_sql'\n" . $rename_result->get_error_message() );
+			throw new \RuntimeException( "Unable to rename table: '$rename_sql'\n" . $rename_result->get_error_message() ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		$create_like_table_sql = "CREATE TABLE {$source_table} LIKE $match_collation_for_table";
@@ -3134,7 +3160,7 @@ class ContentDiffMigrator {
 		$create_result         = $this->wpdb->query( $create_like_table_sql );
 
 		if ( is_wp_error( $create_result ) ) {
-			throw new \RuntimeException( "Unable to create table: '$create_like_table_sql'\n" . $create_result->get_error_message() );
+			throw new \RuntimeException( "Unable to create table: '$create_like_table_sql'\n" . $create_result->get_error_message() ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		$limiter = [
@@ -3150,7 +3176,7 @@ class ContentDiffMigrator {
 		$count                 = $this->wpdb->get_row( "SELECT COUNT(*) as counter FROM $backup_table;" );
 
 		if ( 0 === $count ) {
-			throw new \RuntimeException( "Table '$backup_table' has 0 rows. No need to continue." );
+			throw new \RuntimeException( "Table '$backup_table' has 0 rows. No need to continue." ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		$iterations = ceil( $count->counter / $limiter['limit'] );

@@ -179,7 +179,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 					[
 						'type'        => 'assoc',
 						'name'        => 'custom-taxonomies-csv',
-						'description' => 'CSV of all the custm taxonomies to import, no extra spaces. E.g. --custom-taxonomies-csv=brand,author,custom_taxonomy.',
+						'description' => 'CSV of all the taxonomies to import, no extra spaces. NOTE, if you are modifying this list, make sure to include category and post_tag or else these will not be migrated. E.g. --custom-taxonomies-csv=post_tag,category,brand,custom_taxonomy.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -348,7 +348,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		// Get export dir param. Will save a detailed log there.
 		$export_dir = $assoc_args['export-dir'];
 		if ( ! file_exists( $export_dir ) ) {
-			$made = mkdir( $export_dir, 0777, true );
+			$made = mkdir( $export_dir, 0777, true ); // phpcs:ignore -- We allow creating this directory for logs.
 			if ( false == $made ) {
 				WP_CLI::error( "Could not create export directory $export_dir ." );
 			}
@@ -498,11 +498,9 @@ class ContentDiffMigrator implements InterfaceCommand {
 	public function cmd_migrate_live_content( $args, $assoc_args ) {
 		global $wpdb;
 
-		$import_dir                             = $assoc_args['import-dir'] ?? false;
-		$live_table_prefix                      = $assoc_args['live-table-prefix'] ?? false;
-		$custom_taxonomies                      = isset( $assoc_args['custom-taxonomies-csv'] ) ? explode( ',', $assoc_args['custom-taxonomies-csv'] ) : [];
-		$hierarchical_taxonomies_to_migrate     = [ 'category' ];
-		$non_hierarchical_taxonomies_to_migrate = [ 'post_tag' ];
+		$import_dir            = $assoc_args['import-dir'] ?? false;
+		$live_table_prefix     = $assoc_args['live-table-prefix'] ?? false;
+		$taxonomies_to_migrate = isset( $assoc_args['custom-taxonomies-csv'] ) ? explode( ',', $assoc_args['custom-taxonomies-csv'] ) : [ 'category', 'post_tag' ];
 
 		// Validate all params.
 		$file_ids_csv      = $import_dir . '/' . self::LOG_IDS_CSV;
@@ -514,6 +512,16 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$all_live_modified_posts_data = file_exists( $file_ids_modified ) ? $this->get_data_from_log( $file_ids_modified, [ 'live_id', 'local_id' ] ) : [];
 		if ( empty( $all_live_posts_ids ) ) {
 			WP_CLI::error( sprintf( 'File %s does not contain valid CSV IDs.', $file_ids_csv ) );
+		}
+
+		// In case some custom taxonomies were provided, but category or post_tag were not among those, warn the user that they won't be migrated and ask for confirmation to continue.
+		if ( ! empty( $assoc_args['custom-taxonomies-csv'] ) ) {
+			if ( ! in_array( 'category', $taxonomies_to_migrate ) ) {
+				WP_CLI::confirm( 'Warning, category was not given in --custom-taxonomies-csv argument and so categories will not be migrated. Continue?' );
+			}
+			if ( ! in_array( 'post_tag', $taxonomies_to_migrate ) ) {
+				WP_CLI::confirm( 'Warning, post_tag was not given in --custom-taxonomies-csv argument and so tags will not be migrated. Continue?' );
+			}
 		}
 
 		// Validate DBs.
@@ -530,27 +538,6 @@ class ContentDiffMigrator implements InterfaceCommand {
 					'skip-tables'       => 'options',
 				]
 			);
-		}
-
-		// Validate custom taxonomies, and separate hierarchical from non-hierarchical.
-		if ( ! empty( $custom_taxonomies ) ) {
-			// Check if any of the custom taxonomies exist in the live DB.
-			$live_table_prefix_escaped = esc_sql( $live_table_prefix );
-			// phpcs:ignore -- table prefix string value was escaped.
-			$custom_taxonomies_live = $wpdb->get_col( "SELECT DISTINCT( taxonomy ) FROM {$live_table_prefix_escaped}term_taxonomy WHERE taxonomy NOT IN ('category', 'post_tag') ;" );
-			WP_CLI::log( sprintf( 'These unique custom taxonomies exist in live DB:%s', "\n- " . implode( "\n- ", $custom_taxonomies_live ) ) );
-
-			foreach ( $custom_taxonomies as $custom_taxonomy ) {
-				if ( ! in_array( $custom_taxonomy, $custom_taxonomies_live ) ) {
-					WP_CLI::error( sprintf( 'Custom taxonomy %s not found in live DB.', $custom_taxonomy ) );
-				}
-
-				if ( is_taxonomy_hierarchical( $custom_taxonomy ) ) {
-					$hierarchical_taxonomies_to_migrate[] = $custom_taxonomy;
-				} else {
-					$non_hierarchical_taxonomies_to_migrate[] = $custom_taxonomy;
-				}
-			}
 		}
 
 		// Set constants.
@@ -573,12 +560,20 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$this->log( $this->log_updated_featured_imgs_ids, sprintf( 'Starting %s.', $ts ) );
 		$this->log( $this->log_updated_blocks_ids, sprintf( 'Starting %s.', $ts ) );
 
-		// Before we create hierarchical taxonomies, let's make sure hierarchical taxonomies have valid parents. If they don't they should be fixed first.
-		WP_CLI::log( 'Validating hierarchical taxonomies...' );
-		$this->validate_hierarchical_taxonomies( $hierarchical_taxonomies_to_migrate );
+		// List all the custom taxonomies which exist in Live DB for user's overview.
+		// phpcs:ignore -- table prefix string value was escaped.
+		$live_table_prefix_escaped = esc_sql( $live_table_prefix );
+		$live_taxonomies = $wpdb->get_col( "SELECT DISTINCT( taxonomy ) FROM {$live_table_prefix_escaped}term_taxonomy ;" ); // phpcs:ignore -- table prefix string value was escaped.
+		WP_CLI::log( sprintf( 'Here is a list of all the taxonomies which exist in the live DB:%s', "\n- " . implode( "\n- ", $live_taxonomies ) ) );
 
-		WP_CLI::log( 'Recreating hierarchical taxonomies...' );
-		$hierarchical_taxonomy_term_id_updates = $this->recreate_hierarchical_taxonomies( $hierarchical_taxonomies_to_migrate );
+		// Before we create hierarchical taxonomies, let's make sure all hierarchical taxonomies have valid parents. If they don't they should be fixed first.
+		WP_CLI::log( sprintf( 'Validating all the taxonomies which will be migrated: %s', "\n- " . implode( "\n- ", $taxonomies_to_migrate ) ) );
+		$this->validate_hierarchical_taxonomies( $taxonomies_to_migrate, $live_taxonomies );
+
+		// Recreate taxonomies but leave out (unused) tags.
+		$taxonomies_to_recreate = array_diff( $taxonomies_to_migrate, [ 'post_tag' ] );
+		WP_CLI::log( sprintf( 'Recreating taxonomies %s ...', "\n- " . implode( "\n- ", $taxonomies_to_recreate ) ) );
+		$hierarchical_taxonomy_term_id_updates = $this->recreate_hierarchical_taxonomies( $taxonomies_to_recreate );
 
 		if ( ! empty( $all_live_modified_posts_data ) ) {
 			WP_CLI::log( sprintf( 'Deleting %s modified posts before they are reimported...', count( $all_live_modified_posts_data ) ) );
@@ -593,8 +588,8 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$modified_live_ids  = array_keys( $modified_ids_map );
 		$modified_local_ids = array_values( $modified_ids_map );
 		/**
-		 * Importing modified IDS. Different kind of data could have been updated for a post (content, author, featured image),
-		 * so the easies way to refresh them is to:
+		 * Importing modified IDS. Different kind of data could have been updated for a post (content, author, featured image, etc.),
+		 * so the easiest way to refresh them is to:
 		 * 1. delete the existing post,
 		 * 2. reimport it
 		 */
@@ -638,14 +633,22 @@ class ContentDiffMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Validates local DB and live DB categories. Checks if the categories' parent term_ids are correct and resets those if not.
+	 * Validates local DB and live DB taxonomies. Checks if the taxonomies's parent term_ids are correct in the live DB, and sets those to zero if they are not correct.
 	 *
 	 * @param array $taxonomies_to_check Hierarchical taxonomies to validate.
+	 * @param array $live_taxonomies     List of all taxonomies found in the Live DB.
 	 *
 	 * @return void
 	 */
-	public function validate_hierarchical_taxonomies( $taxonomies_to_check ): void {
+	public function validate_hierarchical_taxonomies( $taxonomies_to_check, $live_taxonomies ): void {
 		global $wpdb;
+
+		// Check if any of the taxonomies does not exist in the live DB.
+		foreach ( $taxonomies_to_check as $taxonomy_to_check ) {
+			if ( ! in_array( $taxonomy_to_check, $live_taxonomies ) ) {
+				WP_CLI::error( sprintf( 'Taxonomy %s not found in live DB.', $taxonomy_to_check ) );
+			}
+		}
 
 		// Check if any of the local taxonomies have nonexistent wp_term_taxonomy.parent, and fix those before continuing.
 		$hierarchical_taxonomies = self::$logic->get_taxonomies_with_nonexistent_parents( $wpdb->prefix, $taxonomies_to_check );
@@ -657,10 +660,10 @@ class ContentDiffMigrator implements InterfaceCommand {
 				$term_taxonomy_ids[] = $hierarchical_taxonomy['term_taxonomy_id'];
 			}
 
-			WP_CLI::warning( 'The following local DB hierarchical taxonomies have invalid parent IDs which must be fixed (and set to 0) first.' );
+			WP_CLI::warning( 'The following local DB hierarchical taxonomies have invalid parent IDs which will be fixed first (their parents set to 0).' );
 			WP_CLI::log( $list );
 
-			WP_CLI::confirm( "OK to fix and set all these hierarchical taxonomies' parents to 0?" );
+			WP_CLI::confirm( "OK to fix and set all these hierarchical taxonomies' parents to 0? in local site's DB tables" );
 			self::$logic->reset_hierarchical_taxonomies_parents( $wpdb->prefix, $term_taxonomy_ids );
 		}
 
@@ -674,10 +677,10 @@ class ContentDiffMigrator implements InterfaceCommand {
 				$term_taxonomy_ids[] = $hierarchical_taxonomy['term_taxonomy_id'];
 			}
 
-			WP_CLI::warning( 'The following live DB hierarchical taxonomies have invalid parent IDs which must be fixed (and set to 0) first.' );
+			WP_CLI::warning( 'The following live DB hierarchical taxonomies have invalid parent IDs which must be fixed first (their parents set to 0 in live tables).' );
 			WP_CLI::log( $list );
 
-			WP_CLI::confirm( "OK to fix and set all these hierarchical taxonomies' parents to 0?" );
+			WP_CLI::confirm( "OK to fix and set all these hierarchical taxonomies' parents to 0 in live DB tables?" );
 			self::$logic->reset_hierarchical_taxonomies_parents( $this->live_table_prefix, $term_taxonomy_ids );
 		}
 	}
@@ -767,13 +770,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 *
 	 * If hierarchical cats are used, their whole structure should be in place when they get assigned to posts.
 	 *
-	 * @param array $hierarchical_taxonomies_to_migrate Hierarchical taxonomies to migrate.
+	 * @param array $taxonomies_to_migrate Hierarchical taxonomies to migrate.
 	 *
 	 * @return array Map of taxonomy term_id udpdates. Keys are hierarchical taxonomies' term_ids on Live and values are corresponding
 	 *               hierarchical taxonomies' term_ids on local (staging).
 	 */
-	public function recreate_hierarchical_taxonomies( $hierarchical_taxonomies_to_migrate ) {
-		$hierarchical_taxonomy_term_id_updates = self::$logic->recreate_hierarchical_taxonomies( $this->live_table_prefix, $hierarchical_taxonomies_to_migrate );
+	public function recreate_hierarchical_taxonomies( $taxonomies_to_migrate ) {
+		$hierarchical_taxonomy_term_id_updates = self::$logic->recreate_hierarchical_taxonomies( $this->live_table_prefix, $taxonomies_to_migrate );
 
 		// Log taxonomy term_id updates.
 		$this->log(
@@ -998,7 +1001,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 			// Warn if this post_parent object was not found/imported. It might be legit, like the parent object being a
 			// post_type different than the supported post type, or an error like the post_parent object missing in Live DB.
 			if ( is_null( $parent_id_new ) ) {
-				// If all attempts failed (possible that parent didn't exist in live DB, or is of a non-imported post_type), set it to 0.
+				// If all attempts failed (possibly this parent does not exist in the live DB, or if this parent is of a post_type which was not imported), set that post_parent to 0.
 				$parent_id_new = 0;
 
 				$this->log( $this->log_error, sprintf( 'update_post_parent_ids error, $id_old=%s, $id_new=%s, $parent_id_old=%s, $parent_id_new is 0.', $id_old, $id_new, $parent_id_old ) );
@@ -1212,7 +1215,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 
 		// Validate $where_operand.
 		if ( ! in_array( $where_operand, $supported_where_operands ) ) {
-			throw new \RuntimeException( sprintf( 'Where operand %s is not supported.', $where_operand ) );
+			throw new \RuntimeException( sprintf( 'Where operand %s is not supported.', esc_textarea( $where_operand ) ) );
 		}
 
 		foreach ( $imported_posts_log_data as $entry ) {
