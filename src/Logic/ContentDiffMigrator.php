@@ -7,8 +7,8 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
-use \WP_CLI;
-use \WP_User;
+use WP_CLI;
+use WP_User;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
 use NewspackCustomContentMigrator\Utils\PHP as PHPUtil;
@@ -21,8 +21,11 @@ use wpdb;
  */
 class ContentDiffMigrator {
 
-	// Postmeta telling us what the old live ID was.
-	const SAVED_META_LIVE_POST_ID = 'newspackcontentdiff_live_id';
+	/**
+	 * Postmeta with original live ID to be used with sprintf() and hostname of the site as parameter.
+	 * Use $this->get_meta_key_original_id() to get the meta_key.
+	 */
+	const META_KEY_ORIGINAL_ID__SPRINTF_HOSTNAME = 'newspackcontentdiff_%s_original_id';
 
 	// Data array keys.
 	const DATAKEY_POST              = 'post';
@@ -50,6 +53,13 @@ class ContentDiffMigrator {
 		'usermeta',
 		'users',
 	];
+
+	/**
+	 * Hostname of the site from which the content is coming from, no subdomains.
+	 *
+	 * @var string $hostname_source Hostname of the source site.
+	 */
+	private $hostname_source;
 
 	/**
 	 * Global $wpdb.
@@ -83,11 +93,27 @@ class ContentDiffMigrator {
 	 * ContentDiffMigrator constructor.
 	 *
 	 * @param object $wpdb Global $wpdb.
+	 * @param string $hostname_source Hostname of the site from which the content is coming from, no subdomains.
 	 */
-	public function __construct( $wpdb ) {
+	public function __construct( $wpdb, string $hostname_source ) {
 		$this->wpdb                     = $wpdb;
+		$this->hostname_source          = $hostname_source;
 		$this->wp_block_manipulator     = new WpBlockManipulator();
 		$this->html_element_manipulator = new HtmlElementManipulator();
+	}
+
+	/**
+	 * Returns meta_key name for postmeta which stores original ID in meta_value.
+	 * This meta_key contains source domain hostname to differentiate between possibly
+	 * multiple sites merged into local.
+	 *
+	 * @return string meta_key for postmeta containing the original ID.
+	 */
+	public function get_meta_key_original_id() {
+		if ( ! $this->hostname_source ) {
+			throw new \UnexpectedValueException( '$hostname_source not set.' );
+		}
+		return sprintf( self::META_KEY_ORIGINAL_ID__SPRINTF_HOSTNAME, $this->hostname_source );
 	}
 
 	/**
@@ -194,7 +220,7 @@ class ContentDiffMigrator {
 					JOIN {$this->wpdb->posts} wp ON wp.ID = wpm.post_id 
 					WHERE wpm.meta_key = %s
 					AND wp.post_type = 'attachment';",
-				self::SAVED_META_LIVE_POST_ID,
+				$this->get_meta_key_original_id(),
 			),
 			ARRAY_A
 		);
@@ -224,7 +250,7 @@ class ContentDiffMigrator {
 					WHERE wpm.meta_key = %s
 					AND wp.post_type IN ( {$post_types_placeholders} );",
 				array_merge(
-					[ self::SAVED_META_LIVE_POST_ID ] ,
+					[ $this->get_meta_key_original_id() ] ,
 					$post_types
 				)
 			),
@@ -2662,7 +2688,7 @@ class ContentDiffMigrator {
 			$where_sprintf = '';
 			foreach ( $where_conditions as $column => $value ) {
 				$where_sprintf .= ( ! empty( $where_sprintf ) ? ' AND' : '' )
-								  . ' ' . esc_sql( $column ) . ' = %s';
+									. ' ' . esc_sql( $column ) . ' = %s';
 			}
 			$where_sprintf = ' WHERE' . $where_sprintf;
 			$sql_sprintf   = $sql . $where_sprintf;
@@ -2753,7 +2779,7 @@ class ContentDiffMigrator {
 			$this->wpdb->usermeta,
 			[
 				'user_id'    => $new_user_id,
-				'meta_key'   => self::SAVED_META_LIVE_POST_ID,
+				'meta_key'   => $this->get_meta_key_original_id(),
 				'meta_value' => $old_user_id,
 			]
 		);
@@ -3157,7 +3183,7 @@ class ContentDiffMigrator {
 		$table_columns_sql = "SHOW COLUMNS FROM $source_table";
 		// phpcs:ignore -- query fully sanitized.
 		$table_columns_results = $this->wpdb->get_results( $table_columns_sql );
-		$table_columns         = implode( ',', array_map( fn( $column_row) => "`$column_row->Field`", $table_columns_results ) );
+		$table_columns         = implode( ',', array_map( fn( $column_row ) => "`$column_row->Field`", $table_columns_results ) );
 		// phpcs:ignore -- query fully sanitized.
 		$count                 = $this->wpdb->get_row( "SELECT COUNT(*) as counter FROM $backup_table;" );
 
@@ -3197,7 +3223,7 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Finds for current post ID by old live DB ID, by searching for the self::SAVED_META_LIVE_POST_ID post meta.
+	 * Finds for current post ID by old live DB ID, by searching for the $this->get_meta_key_original_id() post meta.
 	 *
 	 * @param int|string $id_live  Post ID from live DB.
 	 * @param string     $meta_key Name of postmeta which contains old post ID.
