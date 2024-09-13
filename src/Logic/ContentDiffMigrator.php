@@ -917,7 +917,7 @@ class ContentDiffMigrator {
 		foreach ( $users_rows as $user_row ) {
 			// Skip if user exists.
 			$user_existing = $this->get_user_by( 'login', $user_row['user_login'] );
-			if ( $user_existing instanceof WP_User || false == $user_existing ) {
+			if ( $user_existing instanceof WP_User ) {
 				continue;
 			}
 

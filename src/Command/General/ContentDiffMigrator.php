@@ -635,14 +635,29 @@ class ContentDiffMigrator implements InterfaceCommand {
 		if ( file_exists( $this->log_error ) ) {
 			$cli_output_logs_report[] = sprintf( '%s - errors', $this->log_error );
 		}
+		if ( file_exists( $this->log_deleted_modified_ids ) ) {
+			$cli_output_logs_report[] = sprintf( '%s - all modified post IDs', $this->log_deleted_modified_ids );
+		}
 		if ( file_exists( $this->log_imported_post_ids ) ) {
 			$cli_output_logs_report[] = sprintf( '%s - all imported IDs', $this->log_imported_post_ids );
+		}
+		if ( file_exists( $this->log_recreated_hierarchical_taxonomies ) ) {
+			$cli_output_logs_report[] = sprintf( '%s - created taxonomies', $this->log_recreated_hierarchical_taxonomies );
+		}
+		if ( file_exists( $this->log_inserted_wp_users ) ) {
+			$cli_output_logs_report[] = sprintf( '%s - created WP_Users', $this->log_inserted_wp_users );
 		}
 		if ( file_exists( $this->log_updated_blocks_ids ) ) {
 			$cli_output_logs_report[] = sprintf( '%s - detailed blocks IDs post content replacements', $this->log_updated_blocks_ids );
 		}
+		if ( file_exists( $this->log_updated_posts_parent_ids ) ) {
+			$cli_output_logs_report[] = sprintf( '%s - post_parent IDs updates', $this->log_updated_posts_parent_ids );
+		}
+		if ( file_exists( $this->log_updated_featured_imgs_ids ) ) {
+			$cli_output_logs_report[] = sprintf( '%s - featured image IDs updates', $this->log_updated_featured_imgs_ids );
+		}
 		if ( ! empty( $cli_output_logs_report ) ) {
-			WP_CLI::log( 'Check the logs for more details:' );
+			WP_CLI::success( 'Check the logs for more details:' );
 			WP_CLI::log( '- ' . implode( "\n- ", $cli_output_logs_report ) );
 		}
 
