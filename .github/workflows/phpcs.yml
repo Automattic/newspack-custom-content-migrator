@@ -14,12 +14,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install dependencies
+      - name: Check for PHP file changes
+        id: check_php_changes
         run: |
-          jq 'del(.require, .repositories)' composer.json > composer.dev.json
-          rm composer.lock
-          COMPOSER=composer.dev.json composer install --no-interaction --prefer-dist --no-progress --no-scripts --ignore-platform-reqs
+          CHANGED_PHP_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} | grep '\.php$' || true)
+          echo "CHANGED_PHP_FILES=$CHANGED_PHP_FILES" >> $GITHUB_ENV
 
-      - name: Run PHP CodeSniffer
+      - name: Set flag for PHP file changes
         run: |
-          git diff --name-only ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} -- '*.php' | xargs -r composer run phpcs
+          if [ -n "${{ env.CHANGED_PHP_FILES }}" ]; then
+            echo "php_files_changed=true" >> $GITHUB_ENV
+          else
+            echo "php_files_changed=false" >> $GITHUB_ENV
+          fi
+
+      - name: Install dependencies
+        if: ${{ env.php_files_changed == 'true' }}
+        run: composer install
+
+      - name: Run PHP CodeSniffer on changed files
+        if: ${{ env.php_files_changed == 'true' }}
+        run: |
+          ./vendor/bin/phpcs-changed --git --git-base ${{ github.event.pull_request.base.sha }} $(git diff --name-only ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} | grep '\.php$')
