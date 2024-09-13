@@ -579,6 +579,10 @@ class ContentDiffMigrator implements InterfaceCommand {
 		WP_CLI::log( sprintf( 'Recreating taxonomies %s ...', "\n- " . implode( "\n- ", $taxonomies_to_recreate ) ) );
 		$hierarchical_taxonomy_term_id_updates = $this->recreate_hierarchical_taxonomies( $taxonomies_to_recreate );
 
+		// Migrate all WP_Users (for WooComm data).
+		WP_CLI::log( 'Migrating all WP_Users...' );
+		self::$logic->migrate_all_users( $live_table_prefix );
+
 		if ( ! empty( $all_live_modified_posts_data ) ) {
 			WP_CLI::log( sprintf( 'Deleting %s modified posts before they are reimported...', count( $all_live_modified_posts_data ) ) );
 		}

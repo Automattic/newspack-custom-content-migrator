@@ -12,6 +12,7 @@ use WP_User;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
 use NewspackCustomContentMigrator\Utils\PHP as PHPUtil;
+use RuntimeException;
 use wpdb;
 
 /**
@@ -896,6 +897,43 @@ class ContentDiffMigrator {
 		}
 
 		return $term_id;
+	}
+
+	/**
+	 * Recreates all hierarchical or non-hierarchical taxonomies from Live to local.
+	 *
+	 * @param string $live_table_prefix Live DB table prefix.
+	 *
+	 * @return array Map of all newly inserted users. Keys are Live wp_user.ID's, and values are newly inserted user IDs.
+	 * 
+	 * @throws RuntimeException If user insertion fails, thrown by insert_usermeta_row and insert_user.
+	 */
+	public function migrate_all_users( $live_table_prefix ) {
+		
+		// Keys are Live wp_user.IDs, and values are newly inserted user IDs.
+		$inserted_users_map = [];
+
+		$users_rows = $this->select( $live_table_prefix . 'users', [], $select_just_one_row = false );
+		foreach ( $users_rows as $user_row ) {
+			// Skip if user exists.
+			$user_existing = $this->get_user_by( 'login', $user_row['user_login'] );
+			if ( $user_existing instanceof WP_User || false == $user_existing ) {
+				continue;
+			}
+
+			// Get user metas.
+			$usermeta_rows = $this->select_usermeta_rows( $live_table_prefix, $user_row['ID'] );
+
+			// Insert user and user metas.
+			$user_id_new = $this->insert_user( $user_row );
+			foreach ( $usermeta_rows as $usermeta_row ) {
+				$this->insert_usermeta_row( $usermeta_row, $user_id_new );
+			}
+
+			$inserted_users_map[ $user_row['ID'] ] = $user_id_new;
+		}
+
+		return $inserted_users_map;
 	}
 
 	/**
