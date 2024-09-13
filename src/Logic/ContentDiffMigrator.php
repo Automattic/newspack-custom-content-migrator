@@ -900,13 +900,13 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Recreates all hierarchical or non-hierarchical taxonomies from Live to local.
+	 * Migrates all users from Live tables to local tables.
 	 *
 	 * @param string $live_table_prefix Live DB table prefix.
 	 *
 	 * @return array Map of all newly inserted users. Keys are Live wp_user.ID's, and values are newly inserted user IDs.
 	 * 
-	 * @throws RuntimeException If user insertion fails, thrown by insert_usermeta_row and insert_user.
+	 * @throws RuntimeException If user insertion fails, gets thrown by insert_usermeta_row and insert_user.
 	 */
 	public function migrate_all_users( $live_table_prefix ) {
 		
