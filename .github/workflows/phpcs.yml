@@ -30,7 +30,10 @@ jobs:
 
       - name: Install dependencies
         if: ${{ env.php_files_changed == 'true' }}
-        run: composer install
+        run: |
+          jq 'del(.require, .repositories)' composer.json > composer.dev.json
+          rm composer.lock
+          COMPOSER=composer.dev.json composer install --no-interaction --prefer-dist --no-progress --no-scripts --ignore-platform-reqs
 
       - name: Run PHP CodeSniffer on changed files
         if: ${{ env.php_files_changed == 'true' }}
