@@ -8,6 +8,8 @@ use Exception;
  * Interface for registering commands.
  * 
  * Used in the PluginSetup class to register commands with WP CLI.
+ *
+ * If your migrator class is not mostly static, then @see WpCliCommandTrait for a utility trait.
  */
 interface RegisterCommandInterface {
 
