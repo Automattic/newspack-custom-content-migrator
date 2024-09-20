@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "a3a94a5aa5ca2d33030d7c8c6f490602",
+    "content-hash": "95f212e287b86f9d84964dfbb9973e09",
     "packages": [
         {
             "name": "automattic/newspack-content-converter",
@@ -43,11 +43,11 @@
         },
         {
             "name": "automattic/newspack-migration-tools",
-            "version": "1.0.0",
+            "version": "dev-trunk",
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-migration-tools.git",
-                "reference": "ddc236d3b8f7b4726faf28405e92c147e5f7b0e9"
+                "reference": "a184f511bac1634b9e75733ca95de7ee035cecd1"
             },
             "require": {
                 "php": ">=8.1"
@@ -60,6 +60,7 @@
                 "wp-coding-standards/wpcs": "^3.0",
                 "yoast/phpunit-polyfills": "^2.0"
             },
+            "default-branch": true,
             "type": "library",
             "autoload": {
                 "psr-4": {
@@ -90,7 +91,7 @@
                 "GPL-3.0-or-later"
             ],
             "description": "A set of tools to help migration to WordPress.",
-            "time": "2024-08-13T02:47:07+00:00"
+            "time": "2024-09-05T10:31:26+00:00"
         },
         {
             "name": "automattic/newspack-post-image-downloader",
@@ -4868,7 +4869,8 @@
         "automattic/newspack-post-image-downloader": 20,
         "automattic/newspack-content-converter": 20,
         "simplehtmldom/simplehtmldom": 5,
-        "automattic/newspack-scraper-migrator": 20
+        "automattic/newspack-scraper-migrator": 20,
+        "automattic/newspack-migration-tools": 20
     },
     "prefer-stable": false,
     "prefer-lowest": false,

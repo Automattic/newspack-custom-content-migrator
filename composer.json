@@ -34,7 +34,7 @@
     "mustache/mustache": "^2.14",
     "simplehtmldom/simplehtmldom": "2.0-RC2",
     "automattic/newspack-scraper-migrator": "dev-trunk",
-    "automattic/newspack-migration-tools": "1.0.0"
+    "automattic/newspack-migration-tools": "dev-trunk"
   },
   "require-dev": {
     "automattic/vipwpcs": "^3.0",

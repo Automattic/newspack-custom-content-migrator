@@ -2,10 +2,10 @@
 /**
  * Plugin Name: Newspack Custom Content Migrator
  * Description: A set of tools in CLI environment to assist during a Newspack site content migration.
- * Plugin URI:  https://newspack.blog/
+ * Plugin URI:  https://newspack.com
  * Author:      Automattic
- * Author URI:  https://newspack.blog/
- * Version:     1.5.4
+ * Author URI:  https://newspack.com
+ * Version:     1.6.0
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -70,6 +70,7 @@ PluginSetup::register_migrators(
 		Command\General\LedeMigrator::class,
 		Command\General\DownloadMissingImages::class,
 		Command\General\MigrationHelper::class,
+		Command\General\PaidMembershipsPro2WooCommMigrator::class,
 		Command\General\MolonguiAutorship::class,
 		Command\General\MediumMigrator::class,
 		Command\General\CreativeCircleMigrator::class,
@@ -81,22 +82,7 @@ PluginSetup::register_migrators(
 		Command\General\GhostCMSMigrator::class,
 
 		// Publisher specific, remove when launched.
-		Command\PublisherSpecific\SoccerAmericaMigrator::class,
-		Command\PublisherSpecific\LaSillaVaciaMigrator::class,
-		Command\PublisherSpecific\TheParkRecordMigrator::class,
-		Command\PublisherSpecific\NewsroomNZMigrator::class,
-		Command\PublisherSpecific\LatinFinanceMigrator::class,
-		Command\PublisherSpecific\PCIJMigrator::class,
 		Command\PublisherSpecific\CarsonNowMigrator::class,
-		Command\PublisherSpecific\DallasExaminerMigrator::class,
-		Command\PublisherSpecific\TheCityMigrator::class,
-		Command\PublisherSpecific\LinkNYCMigrator::class,
-		Command\PublisherSpecific\WindyCityMigrator::class,
-		Command\PublisherSpecific\TheFriscMigrator::class,
-		Command\PublisherSpecific\CityViewMigrator::class,
-		Command\PublisherSpecific\BigBendSentinelMigrator::class,
-		Command\PublisherSpecific\LAFocusMigrator::class,
-		Command\PublisherSpecific\TheFifthEstateMigrator::class,
 		Command\PublisherSpecific\ArkansasTimesMigrator::class,
 		Command\PublisherSpecific\ZocaloMigrator::class,
 	)
