@@ -28,6 +28,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 	const LOG_UPDATED_BLOCKS_IDS                = 'content-diff__wp-blocks-ids-updates.log';
 	const LOG_ERROR                             = 'content-diff__err.log';
 	const LOG_RECREATED_HIERARCHICAL_TAXONOMIES = 'content-diff__recreated_hierarchical_taxonomies.log';
+	const LOG_INSERTED_WP_USERS                 = 'content-diff__inserted_wp_users.log';
 
 	/**
 	 * Instance.
@@ -63,6 +64,13 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 * @var null|string Full path to file.
 	 */
 	private $log_recreated_hierarchical_taxonomies;
+	
+	/**
+	 * Log containing inserted WP_User IDs.
+	 *
+	 * @var null|string Full path to file.
+	 */
+	private $log_inserted_wp_users;
 
 	/**
 	 * Log containing imported post IDs.
@@ -552,6 +560,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$this->live_table_prefix                     = $live_table_prefix;
 		$this->log_error                             = $import_dir . '/' . self::LOG_ERROR;
 		$this->log_recreated_hierarchical_taxonomies = $import_dir . '/' . self::LOG_RECREATED_HIERARCHICAL_TAXONOMIES;
+		$this->log_inserted_wp_users                 = $import_dir . '/' . self::LOG_INSERTED_WP_USERS;
 		$this->log_imported_post_ids                 = $import_dir . '/' . self::LOG_IMPORTED_POST_IDS;
 		$this->log_updated_posts_parent_ids          = $import_dir . '/' . self::LOG_UPDATED_PARENT_IDS;
 		$this->log_deleted_modified_ids              = $import_dir . '/' . self::LOG_DELETED_MODIFIED_IDS;
@@ -582,6 +591,10 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$taxonomies_to_recreate = array_diff( $taxonomies_to_migrate, [ 'post_tag' ] );
 		WP_CLI::log( sprintf( 'Recreating taxonomies %s ...', "\n- " . implode( "\n- ", $taxonomies_to_recreate ) ) );
 		$hierarchical_taxonomy_term_id_updates = $this->recreate_hierarchical_taxonomies( $taxonomies_to_recreate );
+
+		// Migrate all WP_Users (for WooComm data).
+		WP_CLI::log( 'Migrating all WP_Users...' );
+		$this->migrate_all_users( $live_table_prefix );
 
 		if ( ! empty( $all_live_modified_posts_data ) ) {
 			WP_CLI::log( sprintf( 'Deleting %s modified posts before they are reimported...', count( $all_live_modified_posts_data ) ) );
@@ -626,14 +639,29 @@ class ContentDiffMigrator implements InterfaceCommand {
 		if ( file_exists( $this->log_error ) ) {
 			$cli_output_logs_report[] = sprintf( '%s - errors', $this->log_error );
 		}
+		if ( file_exists( $this->log_deleted_modified_ids ) ) {
+			$cli_output_logs_report[] = sprintf( '%s - all modified post IDs', $this->log_deleted_modified_ids );
+		}
 		if ( file_exists( $this->log_imported_post_ids ) ) {
 			$cli_output_logs_report[] = sprintf( '%s - all imported IDs', $this->log_imported_post_ids );
+		}
+		if ( file_exists( $this->log_recreated_hierarchical_taxonomies ) ) {
+			$cli_output_logs_report[] = sprintf( '%s - created taxonomies', $this->log_recreated_hierarchical_taxonomies );
+		}
+		if ( file_exists( $this->log_inserted_wp_users ) ) {
+			$cli_output_logs_report[] = sprintf( '%s - created WP_Users', $this->log_inserted_wp_users );
 		}
 		if ( file_exists( $this->log_updated_blocks_ids ) ) {
 			$cli_output_logs_report[] = sprintf( '%s - detailed blocks IDs post content replacements', $this->log_updated_blocks_ids );
 		}
+		if ( file_exists( $this->log_updated_posts_parent_ids ) ) {
+			$cli_output_logs_report[] = sprintf( '%s - post_parent IDs updates', $this->log_updated_posts_parent_ids );
+		}
+		if ( file_exists( $this->log_updated_featured_imgs_ids ) ) {
+			$cli_output_logs_report[] = sprintf( '%s - featured image IDs updates', $this->log_updated_featured_imgs_ids );
+		}
 		if ( ! empty( $cli_output_logs_report ) ) {
-			WP_CLI::log( 'Check the logs for more details:' );
+			WP_CLI::success( 'Check the logs for more details:' );
 			WP_CLI::log( '- ' . implode( "\n- ", $cli_output_logs_report ) );
 		}
 
@@ -785,7 +813,7 @@ class ContentDiffMigrator implements InterfaceCommand {
 	 */
 	public function recreate_hierarchical_taxonomies( $taxonomies_to_migrate ) {
 		$hierarchical_taxonomy_term_id_updates = self::$logic->recreate_hierarchical_taxonomies( $this->live_table_prefix, $taxonomies_to_migrate );
-
+		
 		// Log taxonomy term_id updates.
 		$this->log(
 			$this->log_recreated_hierarchical_taxonomies,
@@ -793,6 +821,24 @@ class ContentDiffMigrator implements InterfaceCommand {
 		);
 
 		return $hierarchical_taxonomy_term_id_updates;
+	}
+
+	/**
+	 * Migrates all WP_Users from Live to local.
+	 * 
+	 * @param string $live_table_prefix Live table prefix.
+	 * @return array Map of newly inserted WP_Users, keys are old Live IDs and values are new local IDs.
+	 */
+	public function migrate_all_users( $live_table_prefix ) {
+		$inserted_wp_users_updates = self::$logic->migrate_all_users( $live_table_prefix );
+
+		// Log taxonomy term_id updates.
+		$this->log(
+			$this->log_inserted_wp_users,
+			wp_json_encode( [ 'inserted_wp_users_updates' => $inserted_wp_users_updates ] )
+		);
+
+		return $inserted_wp_users_updates;
 	}
 
 	/**
