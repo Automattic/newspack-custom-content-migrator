@@ -5532,6 +5532,10 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$qa_row['story_id'] = $story_id;
 			$qa_row['post_id']  = $post_id;
 
+			ConsoleColor::white( 'Story ID:' )->underlined_bright_white( $story_id ?? '' )
+						->white( 'Post ID:' )->underlined_bright_white( $post_id ?? '' )
+						->output();
+
 			if ( null === $post_id ) {
 				fputcsv(
 					$qa_file,
