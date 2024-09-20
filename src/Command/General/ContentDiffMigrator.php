@@ -403,6 +403,10 @@ class ContentDiffMigrator implements InterfaceCommand {
 		$export_dir        = $assoc_args['export-dir'] ?? false;
 		$live_table_prefix = $assoc_args['live-table-prefix'] ?? false;
 		$post_types        = isset( $assoc_args['post-types-csv'] ) ? explode( ',', $assoc_args['post-types-csv'] ) : [ 'post', 'attachment' ];
+		// Disable CAP's "guest-author" CPT.
+		if ( in_array( 'guest-author', $post_types ) ) {
+			WP_CLI::error( "CAP's 'guest-author' CPT is not supported at this point as CAP data requires a dedicated migrator for its complexity and special cases. Please remove 'guest-author' from the list of CPTs to migrate and re-run the command." );
+		}
 
 		global $wpdb;
 		try {
