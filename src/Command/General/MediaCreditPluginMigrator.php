@@ -20,14 +20,17 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 /**
  * Custom migration scripts for Media Credit Plugin.
  */
-class MediaCreditPluginMigrator implements InterfaceCommand {
+class MediaCreditPluginMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	const POSTMETA_KEY_OTHER_CREDITS = 'newspack_media_credit_other_credits';
 
@@ -60,13 +63,6 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	private $report = array();
 
 	/**
-	 * Instance
-	 * 
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
-	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -74,27 +70,13 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator migrate-media-credit-plugin',
-			[ $this, 'cmd_migrate_media_credit_plugin' ],
+			self::get_command_closure( 'cmd_migrate_media_credit_plugin' ),
 			[
 				'shortdesc' => 'Migrate Media Credit Plugin postmeta and shortcodes.',
 				'synopsis'  => [
@@ -111,7 +93,7 @@ class MediaCreditPluginMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator review-media-credit-plugin-other-credits',
-			[ $this, 'cmd_review_media_credit_plugin_other_credits' ],
+			self::get_command_closure( 'cmd_review_media_credit_plugin_other_credits' ),
 			[
 				'shortdesc' => 'Review Media Credit Plugin "other credits" that are saved in postmeta. Log will contain possible SQL to run.',
 			]

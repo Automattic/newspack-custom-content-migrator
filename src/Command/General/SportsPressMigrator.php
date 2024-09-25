@@ -2,11 +2,13 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Command\General\PostsMigrator;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \WP_CLI;
 
-class SportsPressMigrator implements InterfaceCommand {
+class SportsPressMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * @var string SportsPress content export file name.
@@ -30,14 +32,9 @@ class SportsPressMigrator implements InterfaceCommand {
 	];
 
 	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
-	/**
 	 * @var PostsMigrator logic.
 	 */
-	private $posts_logic = null;
+	private PostsMigrator $posts_logic;
 
 	/**
 	 * Constructor.
@@ -47,24 +44,10 @@ class SportsPressMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class;
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator export-sportspress-content', [ $this, 'cmd_export_sportspress_contents' ], [
+	public static function register_commands(): void {
+		WP_CLI::add_command( 'newspack-content-migrator export-sportspress-content', self::get_command_closure( 'cmd_export_sportspress_contents' ), [
 			'shortdesc' => 'Exports SporsPress plugin contents.',
 			'synopsis'  => [
 				[
@@ -77,7 +60,7 @@ class SportsPressMigrator implements InterfaceCommand {
 			],
 		] );
 
-		WP_CLI::add_command( 'newspack-content-migrator import-sportspress-content', [ $this, 'cmd_import_sportspress_content' ], [
+		WP_CLI::add_command( 'newspack-content-migrator import-sportspress-content', self::get_command_closure( 'cmd_import_sportspress_content' ), [
 			'shortdesc' => 'Imports custom SportsPress posts from the XML.',
 			'synopsis'  => [
 				[

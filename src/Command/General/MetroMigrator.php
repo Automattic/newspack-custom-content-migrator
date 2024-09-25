@@ -2,19 +2,17 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use WP_CLI;
 
-class MetroMigrator implements InterfaceCommand {
+class MetroMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	private $ids_mappings;
 	private $mappings_folder;
-
-	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
 
 	/**
 	 * Constructor.
@@ -25,25 +23,11 @@ class MetroMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class;
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static  function register_commands(): void {
 		WP_CLI::add_command( 'newspack-content-migrator metro-import-sections',
-			[ $this, 'cmd_metro_import_sections' ],
+			self::get_command_closure( 'cmd_metro_import_sections' ),
 			[
 				'shortdesc' => 'Import Metro Sections as categories.',
 				'synopsis'  => [
@@ -59,7 +43,7 @@ class MetroMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command( 'newspack-content-migrator metro-find-tags-types',
-			[ $this, 'cmd_metro_find_tags_types' ],
+			self::get_command_closure( 'cmd_metro_find_tags_types' ),
 			[
 				'shortdesc' => 'Find the tags types (author/normal tag) to use later.',
 				'synopsis'  => [
@@ -75,7 +59,7 @@ class MetroMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command( 'newspack-content-migrator metro-import-tags',
-			[ $this, 'cmd_metro_import_tags' ],
+			self::get_command_closure( 'cmd_metro_import_tags' ),
 			[
 				'shortdesc' => 'Import Metro tags.',
 				'synopsis'  => [
@@ -91,7 +75,7 @@ class MetroMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command( 'newspack-content-migrator metro-import-authors',
-			[ $this, 'cmd_metro_import_authors' ],
+			self::get_command_closure( 'cmd_metro_import_authors' ),
 			[
 				'shortdesc' => 'Import Metro authors.',
 				'synopsis'  => [
@@ -107,7 +91,7 @@ class MetroMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command( 'newspack-content-migrator metro-import-files',
-			[ $this, 'cmd_metro_import_files' ],
+			self::get_command_closure( 'cmd_metro_import_files' ),
 			[
 				'shortdesc' => 'Import Metro files.',
 				'synopsis'  => [
@@ -123,7 +107,7 @@ class MetroMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command( 'newspack-content-migrator metro-import-content',
-			[ $this, 'cmd_metro_import_content' ],
+			self::get_command_closure( 'cmd_metro_import_content' ),
 			[
 				'shortdesc' => 'Import Metro content (posts).',
 				'synopsis'  => [
@@ -139,7 +123,7 @@ class MetroMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command( 'newspack-content-migrator metro-import-locations',
-			[ $this, 'cmd_metro_import_locations' ],
+			self::get_command_closure( 'cmd_metro_import_locations' ),
 			[
 				'shortdesc' => 'Import Metro locations.',
 				'synopsis'  => [
@@ -155,7 +139,7 @@ class MetroMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command( 'newspack-content-migrator metro-import-events',
-			[ $this, 'cmd_metro_import_events' ],
+			self::get_command_closure( 'cmd_metro_import_events' ),
 			[
 				'shortdesc' => 'Import Metro events.',
 				'synopsis'  => [
@@ -171,7 +155,7 @@ class MetroMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command( 'newspack-content-migrator metro-update-posts',
-			[ $this, 'cmd_metro_update_posts' ],
+			self::get_command_closure( 'cmd_metro_update_posts' ),
 			[
 				'shortdesc' => 'Update Metro posts.',
 				'synopsis'  => [
@@ -187,7 +171,7 @@ class MetroMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command( 'newspack-content-migrator metro-fix-jpe-images',
-			[ $this, 'cmd_metro_fix_jpe_images' ],
+			self::get_command_closure( 'cmd_metro_fix_jpe_images' ),
 			[
 				'shortdesc' => 'Fix the JPE images by renaming them to JPEG extension.',
 			]

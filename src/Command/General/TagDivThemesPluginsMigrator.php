@@ -11,8 +11,9 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper as CoAuthorPlusLogic;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
@@ -20,7 +21,9 @@ use WP_CLI;
 /**
  * Custom migration scripts for TagDiv (company) Themes and Plugins.
  */
-class TagDivThemesPluginsMigrator implements InterfaceCommand {
+class TagDivThemesPluginsMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	const TD_POST_THEME_SETTINGS             = 'td_post_theme_settings';
 	const TD_POST_THEME_SETTINGS_SOURCE      = 'td_source';
@@ -55,13 +58,6 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 	private $posts_logic = null;
 
 	/**
-	 * Instance
-	 * 
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
-	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -71,27 +67,13 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator migrate-tagdiv-authors-to-gas',
-			[ $this, 'cmd_migrate_tagdiv_authors_to_gas' ],
+			self::get_command_closure( 'cmd_migrate_tagdiv_authors_to_gas' ),
 			[
 				'shortdesc' => 'Migrate TagDiv authors to GAs.',
 				'synopsis'  => [
@@ -108,7 +90,7 @@ class TagDivThemesPluginsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator migrate-tagdiv-primary-categories',
-			[ $this, 'cmd_migrate_tagdiv_primary_categories' ],
+			self::get_command_closure( 'cmd_migrate_tagdiv_primary_categories' ),
 			[
 				'shortdesc' => 'Migrate TagDiv Primary Categories to Yoast.',
 				'synopsis'  => [

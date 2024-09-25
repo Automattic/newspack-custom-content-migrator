@@ -2,16 +2,14 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use \WP_CLI;
 
-class UsersMigrator implements InterfaceCommand {
+class UsersMigrator implements RegisterCommandInterface {
 
-	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
+	use WpCliCommandTrait;
 
 	/**
 	 * @var Logger.
@@ -26,26 +24,12 @@ class UsersMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator delete-all-users-with-role',
-			array( $this, 'cmd_delete_all_users_with_role' ),
+			self::get_command_closure( 'cmd_delete_all_users_with_role' ),
 			array(
 				'shortdesc' => 'Deletes all users.',
 				'synopsis'  => [

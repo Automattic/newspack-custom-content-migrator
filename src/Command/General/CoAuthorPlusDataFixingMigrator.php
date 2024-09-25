@@ -3,28 +3,23 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use cli\Streams;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlusDataFixer;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Posts;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Taxonomy;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use WP_CLI;
-use WP_CLI\ExitException;
 use WP_Error;
 
 /**
  * This class will help you fix your CAP woes.
  */
-class CoAuthorPlusDataFixingMigrator implements InterfaceCommand {
+class CoAuthorPlusDataFixingMigrator implements RegisterCommandInterface {
 
-	/**
-	 * Instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
+	use WpCliCommandTrait;
 
 	/**
 	 * Co-Authors Plus.
@@ -65,29 +60,12 @@ class CoAuthorPlusDataFixingMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Creates an instance of the class.
-	 *
-	 * @return self
+	 * {@inheritDoc}
 	 */
-	public static function get_instance(): self {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * Command registration.
-	 *
-	 * @see InterfaceCommand::register_commands.
-	 */
-	public function register_commands(): void {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator fix-co-authors-data-set-standalone-guest-author-data',
-			[ $this, 'cmd_set_standalone_guest_author_data' ],
+			self::get_command_closure( 'cmd_set_standalone_guest_author_data' ),
 			[
 				'shortdesc' => 'Fixes data for a Standalone Guest Author (i.e. one that is NOT linked to a WP_User)',
 				'synopsis'  => [

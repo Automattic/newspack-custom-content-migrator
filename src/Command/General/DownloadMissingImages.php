@@ -2,19 +2,17 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\Logger;
 use Newspack\MigrationTools\Util\MigrationMeta;
 use WP_CLI;
 
-class DownloadMissingImages implements InterfaceCommand {
+class DownloadMissingImages implements RegisterCommandInterface {
 
-	/**
-	 * @var null|self
-	 */
-	private static $instance = null;
+	use WpCliCommandTrait;
 
 	private $command_meta_key = 'download_missing_images';
 	private $command_meta_version;
@@ -47,24 +45,9 @@ class DownloadMissingImages implements InterfaceCommand {
 		$this->log_file             = "{$this->command_meta_key}_{$this->command_meta_version}.log";
 	}
 
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class;
-		}
-
-		return self::$instance;
-	}
-
-
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command( 'newspack-content-migrator download-missing-images',
-			[ $this, 'cmd_download_missing_images' ],
+			self::get_command_closure( 'cmd_download_missing_images' ),
 			[
 				'shortdesc' => 'Try to find and download missing images',
 				'synopsis'  => [

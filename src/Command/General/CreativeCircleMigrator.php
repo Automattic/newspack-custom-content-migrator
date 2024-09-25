@@ -2,14 +2,17 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack_Scraper_Migrator_Creative_Circle_Scraper;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
-class CreativeCircleMigrator implements InterfaceCommand {
+class CreativeCircleMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	public static $scrape_args = [
 		[
@@ -56,23 +59,6 @@ class CreativeCircleMigrator implements InterfaceCommand {
 		],
 	];
 
-	private $batch_args = [
-		[
-			'type'        => 'assoc',
-			'name'        => 'batch',
-			'description' => 'Batch to start from.',
-			'optional'    => true,
-			'repeating'   => false,
-		],
-		[
-			'type'        => 'assoc',
-			'name'        => 'posts-per-batch',
-			'description' => 'Posts to import per batch',
-			'optional'    => true,
-			'repeating'   => false,
-		],
-	];
-
 	private Logger $logger;
 	private GutenbergBlockGenerator $gutenberg_block_generator;
 	private AttachmentsLogic $attachments_logic;
@@ -84,26 +70,12 @@ class CreativeCircleMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Get Instance.
-	 *
-	 * @return self
-	 */
-	public static function get_instance(): self {
-		static $instance = null;
-		if ( null === $instance ) {
-			$instance = new self();
-		}
-
-		return $instance;
-	}
-
-	/**
 	 * @throws \Exception
 	 */
-	public function register_commands(): void {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator scrape-cc',
-			[ $this, 'cmd_scrape' ],
+			self::get_command_closure( 'cmd_scrape' ),
 			[
 				'shortdesc' => 'Scrape a CC site\'s content.',
 				'synopsis'  => [
@@ -114,11 +86,24 @@ class CreativeCircleMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator cc-migrate-galleries-and-featured-image',
-			[ $this, 'cmd_migrate_galleries_and_featured_image' ],
+			self::get_command_closure( 'cmd_migrate_galleries_and_featured_image' ),
 			[
 				'shortdesc' => 'Migrate galleries and featured images from meta.',
 				'synopsis'  => [
-					...$this->batch_args,
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch to start from.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts to import per batch',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);

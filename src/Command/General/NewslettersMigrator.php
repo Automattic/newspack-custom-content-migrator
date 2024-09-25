@@ -2,22 +2,19 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Command\General\PostsMigrator;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \NewspackCustomContentMigrator\Logic\Newsletters;
 use \WP_CLI;
 
-class NewslettersMigrator implements InterfaceCommand {
+class NewslettersMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * @var string Newsletters.
 	 */
 	const NEWSLETTERS_EXPORT_FILE = 'newspack-newsletters.xml';
-
-	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
 
 	/**
 	 * @var Newsletters
@@ -32,24 +29,10 @@ class NewslettersMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class;
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator export-newsletters', array( $this, 'cmd_export_newsletters' ), [
+	public static function register_commands(): void {
+		WP_CLI::add_command( 'newspack-content-migrator export-newsletters', self::get_command_closure( 'cmd_export_newsletters' ), [
 			'shortdesc' => 'Exports Newspack Newsletters.',
 			'synopsis'  => [
 				[
@@ -62,7 +45,7 @@ class NewslettersMigrator implements InterfaceCommand {
 			],
 		] );
 
-		WP_CLI::add_command( 'newspack-content-migrator import-newsletters', array( $this, 'cmd_import_newsletters' ), [
+		WP_CLI::add_command( 'newspack-content-migrator import-newsletters', self::get_command_closure( 'cmd_import_newsletters' ), [
 			'shortdesc' => 'Imports Newspack Newsletters.',
 			'synopsis'  => [
 				[

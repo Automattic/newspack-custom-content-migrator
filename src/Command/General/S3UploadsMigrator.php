@@ -7,7 +7,8 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\PHP;
 use WP_CLI;
@@ -16,7 +17,9 @@ use WP_Error;
 /**
  * S3UploadsMigrator.
  */
-class S3UploadsMigrator implements InterfaceCommand {
+class S3UploadsMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * Detailed logs file name.
@@ -60,13 +63,6 @@ class S3UploadsMigrator implements InterfaceCommand {
 	 * @var Posts $posts Posts logic.
 	 */
 	private $posts;
-	
-	/**
-	 * Singleton instance.
-	 *
-	 * @var null|InterfaceCommand $instance Instance.
-	 */
-	private static $instance = null;
 
 	/**
 	 * Constructor.
@@ -96,26 +92,12 @@ class S3UploadsMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator s3uploads-upload-directories',
-			[ $this, 'cmd_upload_directories' ],
+			self::get_command_closure( 'cmd_upload_directories' ),
 			[
 				'shortdesc' => "Runs S3-Uploads' `upload-directory` CLI command by splitting the contents of a folder into smaller, safer batches which won't cause S3-Uploads to break in error. It uploads all the recursive contents in the folder, including subfolders if any.",
 				'synopsis'  => [
@@ -145,7 +127,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator s3uploads-remove-subfolders-from-uploadsyyyymm',
-			[ $this, 'cmd_remove_subfolders_from_uploadsyyyymm' ],
+			self::get_command_closure( 'cmd_remove_subfolders_from_uploadsyyyymm' ),
 			[
 				'shortdesc' => "Some S3 integration plugin use a custom subfolder in e.g. '~/wp-content/uploads/YYYY/MM/SUBFOLDER/image.jpg'. This command removes all such subfolders, and moves all the images one level below to '~/wp-content/uploads/YYYY/MM/image.jpg'.",
 			]
@@ -153,7 +135,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator s3uploads-compare-uploads-contents-local-with-s3',
-			[ $this, 'cmd_compare_uploads_contents_local_with_s3' ],
+			self::get_command_closure( 'cmd_compare_uploads_contents_local_with_s3' ),
 			[
 				'shortdesc' => 'This command contains instructions how to compare files from local path with files on S3, and lists a diff -- files that are present on local but missing on S3. ' .
 								'1. Save list of all files from local folder to a --local-log file, run this either on entire uploads/ or year by year. ' . 
@@ -212,7 +194,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator s3uploads-download-all-image-sizes-from-atomic',
-			[ $this, 'cmd_download_all_image_sizes_from_atomic' ],
+			self::get_command_closure( 'cmd_download_all_image_sizes_from_atomic' ),
 			[
 				'shortdesc' => 'Downloads missing intermediate image sizes from given Atomic server which are not present on local disk.' .
 					'Additional info:' .
@@ -281,7 +263,7 @@ class S3UploadsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator s3uploads-discover-image-sizes-used-in-post-content',
-			[ $this, 'cmd_discover_image_sizes_used_in_post_content' ],
+			self::get_command_closure( 'cmd_discover_image_sizes_used_in_post_content' ),
 			[
 				'shortdesc' => 'Loops through all published Posts and Pages and discovers which image sizes might have been used in Posts and Pages.',
 			]

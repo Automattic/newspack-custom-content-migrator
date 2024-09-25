@@ -2,7 +2,8 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Medium;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
@@ -14,7 +15,10 @@ use WP_CLI;
 /**
  * Migrates Medium archive.
  */
-class MediumMigrator implements InterfaceCommand {
+class MediumMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
+
 	const ORIGINAL_ID_META_KEY = '_medium_original_id';
 
 	/**
@@ -23,13 +27,6 @@ class MediumMigrator implements InterfaceCommand {
 	 * @var string $log_file Log file name.
 	 */
 	private static $log_file = 'medium-migrator.log';
-
-	/**
-	 * Migrator instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
 
 	/**
 	 * Medium logic instance.
@@ -78,26 +75,12 @@ class MediumMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator migrate-medium-archive',
-			array( $this, 'cmd_medium_archive' ),
+			self::get_command_closure( 'cmd_medium_archive' ),
 			[
 				'shortdesc' => 'Migrates Medium archive.',
 				'synopsis'  => [

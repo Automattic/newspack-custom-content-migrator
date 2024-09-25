@@ -2,42 +2,19 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Command\General\PostsMigrator;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \WP_CLI;
 
-class CPTMigrator implements InterfaceCommand {
+class CPTMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
-	 * @var null|InterfaceCommand Instance.
+	 * {@inheritDoc}
 	 */
-	private static $instance = null;
-
-	/**
-	 * Constructor.
-	 */
-	private function __construct() {
-	}
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class;
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator cpt-converter', array( $this, 'cmd_convert_cpt' ), [
+	public static function register_commands(): void {
+		WP_CLI::add_command( 'newspack-content-migrator cpt-converter', self::get_command_closure('cmd_convert_cpt' ), [
 			'shortdesc' => 'Converts posts of one type to another.',
 			'synopsis'  => [
 				[

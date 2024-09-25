@@ -2,10 +2,13 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \WP_CLI;
 
-class WooCommOrdersAndSubscriptionsMigrator implements InterfaceCommand {
+class WooCommOrdersAndSubscriptionsMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	const GENERAL_LOG = 'wc_orders_subscriptions_migration.log';
 
@@ -15,37 +18,12 @@ class WooCommOrdersAndSubscriptionsMigrator implements InterfaceCommand {
 	const WOOCOMM_SUBSCRIPTION_CPT = 'shop_subscription';
 
 	/**
-	 * @var null|InterfaceCommand Instance.
+	 * {@inheritDoc}
 	 */
-	private static $instance = null;
-
-	/**
-	 * Constructor.
-	 */
-	private function __construct() {
-	}
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator wc-orders-migrate',
-			[ $this, 'cmd_wc_order_migrate' ],
+			self::get_command_closure( 'cmd_wc_order_migrate' ),
 			[
 				'shortdesc' => 'Migrates WC Orders (with belonging Subscriptions and Customers) from one site to another one. Expects to have source WoComm DB tables (with one prefix) along side destination/local DB tables (with a different prefix).',
 				'synopsis'  => [

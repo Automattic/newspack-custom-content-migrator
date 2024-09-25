@@ -2,8 +2,9 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Logic\Posts;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
@@ -15,7 +16,9 @@ use \WP_CLI;
 /**
  * Custom migration scripts for Chorus CMS.
  */
-class ChorusCmsMigrator implements InterfaceCommand {
+class ChorusCmsMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * Meta key for Chorus CMS' original ID.
@@ -168,13 +171,6 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	];
 
 	/**
-	 * Instance.
-	 *
-	 * @var null|CLASS Instance.
-	 */
-	private static $instance = null;
-
-	/**
 	 * CoAuthors Plus instance.
 	 *
 	 * @var CoAuthorsPlusHelper CoAuthors Plus instance.
@@ -237,26 +233,12 @@ class ChorusCmsMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator chorus-cms-import-authors-and-posts',
-			[ $this, 'cmd_import_authors_and_posts' ],
+			self::get_command_closure( 'cmd_import_authors_and_posts' ),
 			[
 				'shortdesc' => 'Migrates authors and entries (posts) to WordPress.',
 				'synopsis'  => [
@@ -308,7 +290,7 @@ class ChorusCmsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator chorus-cms-import-assets',
-			[ $this, 'cmd_import_assets' ],
+			self::get_command_closure( 'cmd_import_assets' ),
 			[
 				'shortdesc' => 'Imports the entirety of assets JSONs, even if they re not used in posts.',
 				'synopsis'  => [
@@ -340,12 +322,12 @@ class ChorusCmsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator chorus-cms-temp-dev-helper-scripts',
-			[ $this, 'cmd_temp_dev_helper_scripts' ],
+			self::get_command_closure( 'cmd_temp_dev_helper_scripts' ),
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator chorus-output-additional-contributors-prepend-to-post-content',
-			[ $this, 'cmd_additional_contributors_to_post_content' ],
+			self::get_command_closure( 'cmd_additional_contributors_to_post_content' ),
 			[
 				'shortdesc' => 'Prepends a paragraph with additional contributors to post_content and removes those GAs as CoAuthors.',
 			]

@@ -2,7 +2,8 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \NewspackCustomContentMigrator\Logic\Lede;
 use \NewspackCustomContentMigrator\Logic\Posts;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
@@ -11,14 +12,9 @@ use \WP_CLI;
 /**
  * Lede migration commands.
  */
-class LedeMigrator implements InterfaceCommand {
+class LedeMigrator implements RegisterCommandInterface {
 
-	/**
-	 * Instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
+	use WpCliCommandTrait;
 
 	/**
 	 * Lede instance.
@@ -51,26 +47,12 @@ class LedeMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator lede-migrate-authors-to-gas',
-			[ $this, 'cmd_migrate_authors_to_gas' ],
+			self::get_command_closure('cmd_migrate_authors_to_gas' ),
 			[
 				'shortdesc' => 'Migrates that custom Lede Authors plugin data to GA authors.',
 				'synopsis'  => [
@@ -86,7 +68,7 @@ class LedeMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator lede-migrate-dek-postmeta-to-subtitle',
-			[ $this, 'cmd_migrate_dek_postmeta_to_subtitle' ],
+			self::get_command_closure('cmd_migrate_dek_postmeta_to_subtitle' ),
 			[
 				'shortdesc' => 'Migrates postmeta dek to Newspack Subtitle.',
 			]

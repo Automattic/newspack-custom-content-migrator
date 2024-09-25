@@ -2,8 +2,8 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use Exception;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Utils\BatchLogic;
 use WP_CLI;
 use WP_CLI\ExitException;
@@ -11,30 +11,17 @@ use WP_CLI\ExitException;
 /**
  * Class MigrationHelper.
  */
-class MigrationHelper implements InterfaceCommand {
-	/**
-	 * Get Instance.
-	 *
-	 * @return self
-	 */
-	public static function get_instance(): self {
-		static $instance = null;
-		if ( null === $instance ) {
-			$instance = new self();
-		}
+class MigrationHelper implements RegisterCommandInterface {
 
-		return $instance;
-	}
+	use WpCliCommandTrait;
 
 	/**
-	 * Register commands.
-	 *
-	 * @throws Exception When WP_CLI::add_command fails.
+	 * {@inheritDoc}
 	 */
-	public function register_commands(): void {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator migration-helper-output-batched',
-			[ $this, 'cmd_output_batched' ],
+			[ __CLASS__, 'cmd_output_batched' ],
 			[
 				'shortdesc' => 'Outputs commands batched. Only outputs the command strings – will not run any of the commands.',
 				'synopsis'  => [
