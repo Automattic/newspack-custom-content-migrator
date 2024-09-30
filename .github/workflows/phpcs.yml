@@ -18,6 +18,7 @@ jobs:
         id: check_php_changes
         run: |
           CHANGED_PHP_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} | grep '\.php$' || true)
+          CHANGED_PHP_FILES=$(echo "$CHANGED_PHP_FILES" | tr '\n' ' ')
           echo "CHANGED_PHP_FILES=$CHANGED_PHP_FILES" >> $GITHUB_ENV
 
       - name: Set flag for PHP file changes

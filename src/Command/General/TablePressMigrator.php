@@ -69,13 +69,13 @@ array(
 		}
 
 		$table_files  = array_filter( glob( $assoc_args['input-dir'] . '/*.' . $assoc_args['input-type'] ), 'is_file' );
-		$total_tables           = count( $table_files );
+		$total_tables               = count( $table_files );
 
 		foreach ( $table_files as $key_table_file => $table_file ) {
-			WP_CLI::line( sprintf( 'Importing table %d/%d.', $key_table_file + 1, $total_tables ) );
+			WP_CLI::line(sprintf( 'Importing table %d/%d.', $key_table_file + 1, $total_tables ) );
 
 			$data     = file_get_contents( $table_file ); //phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
-			$table_id = $this->table_press_logic->import_table( $assoc_args['input-type'], $data, $table_file, 'Imported table.' );
+			$table_id       = $this->table_press_logic->import_table( $assoc_args['input-type'], $data, $table_file, 'Imported table.' );
 			if ( \is_wp_error( $table_id ) ) {
 				WP_CLI::warning( sprintf( 'An error occured while importing the table %s', $table_file ) );
 			}
