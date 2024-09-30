@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.com
  * Author:      Automattic
  * Author URI:  https://newspack.com
- * Version:     1.6.0
+ * Version:     1.6.1
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -19,8 +19,8 @@ if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 
 require __DIR__ . '/vendor/autoload.php';
 require_once ABSPATH . 'wp-settings.php';
-
-PluginSetup::configure_error_reporting();
+$error_reporting_level = false !== defined( 'NEWSPACK_CUSTOM_CONTENT_MIGRATOR_ERROR_REPORTING_LEVEL' ) ? NEWSPACK_CUSTOM_CONTENT_MIGRATOR_ERROR_REPORTING_LEVEL : 'dev';
+PluginSetup::configure_error_reporting( $error_reporting_level );
 PluginSetup::register_ticker();
 PluginSetup::add_hooks();
 
