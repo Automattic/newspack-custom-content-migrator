@@ -18,7 +18,8 @@ jobs:
         id: check_php_changes
         run: |
           CHANGED_PHP_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} | grep '\.php$' || echo 'no files')
-          if [ "${{ env.CHANGED_PHP_FILES }}" = "no files" ]; then
+          echo $CHANGED_PHP_FILES
+          if [ "$CHANGED_PHP_FILES" = "no files" ]; then
             echo "php_files_changed=false" >> $GITHUB_ENV
           else
             echo "php_files_changed=true" >> $GITHUB_ENV
