@@ -99,12 +99,12 @@ class WooCommOrdersAndSubscriptionsMigrator implements RegisterCommandInterface 
 		}
 
 		foreach ( $source_subscription_ids as $key_source_subscription_ids => $source_subscription_id ) {
-			$msg = sprintf( '(%d/%d) Getting subscription ID %d', $key_source_subscription_ids + 1, count( $source_subscription_ids ), $source_subscription_id );
+			$msg =    sprintf( '(%d/%d) Getting subscription ID %d', $key_source_subscription_ids + 1, count( $source_subscription_ids ), $source_subscription_id );
 			WP_CLI::success( $msg );
 			$this->log( self::GENERAL_LOG, $msg );
 
 			try {
-				$this->migrate_order_or_subscription( $table_prefix_source, $table_prefix_destination, null, $source_subscription_id );
+				$this->migrate_order_or_subscription($table_prefix_source, $table_prefix_destination, null, $source_subscription_id );
 			} catch ( \Exception $e ) {
 				if ( self::EXCEPTION_CODE_SKIP_IMPORTING == $e->getCode() ) {
 					// Continue with the next ID.
