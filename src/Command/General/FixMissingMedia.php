@@ -2,40 +2,19 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \WP_CLI;
 
-class FixMissingMedia implements InterfaceCommand {
+class FixMissingMedia implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
-	 * @var null|InterfaceCommand Instance.
+	 * {@inheritDoc}
 	 */
-	private static $instance = null;
-
-	/**
-	 * Constructor.
-	 */
-	private function __construct() {}
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class;
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
-		WP_CLI::add_command( 'newspack-content-migrator fix-missing-media', array( $this, 'cmd_fix_missing_media' ), [
+	public static function register_commands(): void {
+		WP_CLI::add_command( 'newspack-content-migrator fix-missing-media', self::get_command_closure( 'cmd_fix_missing_media' ), [
 			'shortdesc' => 'Seeks to fix the missing media on a Newspack staging site.',
 			'synopsis'  => [
 				[

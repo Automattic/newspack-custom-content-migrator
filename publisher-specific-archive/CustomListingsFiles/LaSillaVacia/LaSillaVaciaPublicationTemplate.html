@@ -1,0 +1,62 @@
+<!-- wp:columns -->
+<div class="wp-block-columns"><!-- wp:column {"width":"33.33%","layout":{"type":"default"}} -->
+    <div class="wp-block-column" style="flex-basis:33.33%"><!-- wp:image {"id":{image_attachment_id},"sizeSlug":"large","linkDestination":"none"} -->
+        <figure class="wp-block-image size-large"><img src="{image_attachment_src}" alt="" class="wp-image-{image_attachment_id}"/></figure>
+        <!-- /wp:image --></div>
+    <!-- /wp:column -->
+
+    <!-- wp:column {"width":"66.66%"} -->
+    <div class="wp-block-column" style="flex-basis:66.66%"><!-- wp:heading -->
+        <h2>{book_title}</h2>
+        <!-- /wp:heading -->
+        {book_university}
+
+        <!-- wp:post-date {"isLink":true,"style":{"elements":{"link":{"color":{"text":"var:preset|color|vivid-cyan-blue"}}}},"textColor":"vivid-cyan-blue","fontSize":"small"} /-->
+
+        <!-- wp:paragraph -->
+        <p>{book_publisher}</p>
+        <!-- /wp:paragraph -->
+
+        {book_price}
+
+        <!-- wp:buttons -->
+        <div class="wp-block-buttons"><!-- wp:button {"backgroundColor":"vivid-cyan-blue","textColor":"white","width":100,"style":{"typography":{"textTransform":"uppercase"}},"className":"is-style-outline","fontSize":"small"} -->
+            <div class="wp-block-button has-custom-width wp-block-button__width-100 has-custom-font-size is-style-outline has-small-font-size" style="text-transform:uppercase"><a class="wp-block-button__link has-white-color has-vivid-cyan-blue-background-color has-text-color has-background wp-element-button" href="{book_link}">{book_buy_or_download}</a></div>
+            <!-- /wp:button --></div>
+        <!-- /wp:buttons --></div>
+    <!-- /wp:column --></div>
+<!-- /wp:columns -->
+
+<!-- wp:separator {"className":"is-style-wide"} -->
+<hr class="wp-block-separator has-alpha-channel-opacity is-style-wide"/>
+<!-- /wp:separator -->
+
+<!-- wp:heading {"level":4,"style":{"typography":{"textTransform":"uppercase"}}} -->
+<h4 style="text-transform:uppercase">Detalles</h4>
+<!-- /wp:heading -->
+
+<!-- wp:list -->
+<ul><!-- wp:list-item -->
+    <li><strong>Por:</strong> {book_author}</li>
+    <!-- /wp:list-item -->
+
+    <!-- wp:list-item -->
+    <li><strong>Páginas:</strong> {book_pages}</li>
+    <!-- /wp:list-item -->
+
+    {book_isbn}
+
+    {book_issn}
+
+    {book_doi}
+
+    {book_published_year}
+<!-- /wp:list -->
+
+<!-- wp:separator {"className":"is-style-wide"} -->
+<hr class="wp-block-separator has-alpha-channel-opacity is-style-wide"/>
+<!-- /wp:separator -->
+
+<!-- wp:html -->
+{book_description}
+<!-- /wp:html -->

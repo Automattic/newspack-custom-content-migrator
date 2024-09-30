@@ -2,14 +2,17 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \WP_CLI;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackPostImageDownloader\Downloader;
 use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
 use \NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
 
-class NextgenGalleryMigrator implements InterfaceCommand {
+class NextgenGalleryMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	// Mtas saved to imported images:
 	// - original NGG picture ID;
@@ -21,11 +24,6 @@ class NextgenGalleryMigrator implements InterfaceCommand {
 	// Supported Gallery blocks.
 	const GUTENBERG_GALLERY_TYPES = array( 'gutenberg-gallery', 'gutenberg-gallery-with-lightbox' );
 	const JETPACK_GALLERY_TYPES   = array( 'jetpack-gallery' );
-
-	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
 
 	/**
 	 * @var Downloader.
@@ -63,26 +61,12 @@ class NextgenGalleryMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Sets up Co-Authors Plus plugin dependencies.
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator nextgen-gallery-to-gutenberg-gallery-blocks',
-			array( $this, 'cmd_nextgen_galleries_to_gutenberg_gallery_blocks' ),
+			self::get_command_closure( 'cmd_nextgen_galleries_to_gutenberg_gallery_blocks' ),
 			array(
 				'shortdesc' => 'Import NextGen images to Media Library, and converts NextGen Galleries throughout all Posts and Pages to Gutenberg Gallery blocks. Before running this command, make sure NextGen DB tables are present locally, and that the gallery folder is found at the configured location and contains all the NextGen images and has correct file permissions.',
 				'synopsis'  => array(

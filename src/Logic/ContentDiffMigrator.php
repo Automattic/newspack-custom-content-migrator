@@ -7,10 +7,12 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
-use \WP_CLI;
-use \WP_User;
+use WP_CLI;
+use WP_User;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
+use NewspackCustomContentMigrator\Utils\PHP as PHPUtil;
+use RuntimeException;
 use wpdb;
 
 /**
@@ -19,6 +21,9 @@ use wpdb;
  * @package NewspackCustomContentMigrator\Logic
  */
 class ContentDiffMigrator {
+
+	// Postmeta telling us what the old live ID was.
+	const SAVED_META_LIVE_POST_ID = 'newspackcontentdiff_live_id';
 
 	// Data array keys.
 	const DATAKEY_POST              = 'post';
@@ -89,12 +94,12 @@ class ContentDiffMigrator {
 	/**
 	 * Gets a diff of new Posts, Pages and Attachments from the Live Site.
 	 *
-	 * @deprecated Deprecated in favor of get_live_diff_content_ids_programmatic, since large JOINs can time out on Atomic.
-	 *
 	 * @param string $live_table_prefix Table prefix for the Live Site.
 	 *
-	 * @throws     \RuntimeException Throws exception if any live tables do not match the collation of their corresponding Core WP DB table.
 	 * @return     array Result from $wpdb->get_results.
+	 * @throws     \RuntimeException Throws exception if any live tables do not match the collation of their corresponding Core WP DB table.
+	 * @deprecated Since large JOINs can time out on Atomic, this was eprecated in favor of `get_posts_rows_for_content_diff` and
+	 * `filter_new_live_ids`. And there's also the new `filter_modified_live_ids` method.
 	 */
 	public function get_live_diff_content_ids( $live_table_prefix ) {
 		if ( ! $this->are_table_collations_matching( $live_table_prefix ) ) {
@@ -140,146 +145,208 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Finds unique IDs in live tables which don't exist in local Staging tables.
-	 * Uses programmatic search technique, since JOIN sometimes times out on Atomic.
-	 * Splits search into two post type groups -- attachments, and all other -- for memory usage reasons.
+	 * Gets records from the $posts_table, $post_types, returns the minimal set of columns needed to determine whether a post
+	 * doesn't exist in DB and needs to be inserted, or has been modified and needs to be updated.
 	 *
-	 * @param string $live_table_prefix Live tables' prefix.
-	 * @param array  $post_types        Post types to search for.
+	 * @param string $posts_table   Name of posts table.
+	 * @param array  $post_types    Post types to fetch.
+	 * @param array  $post_statuses Post statuses to fetch.
 	 *
-	 * @throws \RuntimeException Thrown if collations don't match.
-	 *
-	 * @return array Unique IDs in live tables.
+	 * @return array Associative array with columns specified in used query.
 	 */
-	public function get_live_diff_content_ids_programmatic( string $live_table_prefix, array $post_types ): array {
-		if ( ! $this->are_table_collations_matching( $live_table_prefix ) ) {
-			throw new \RuntimeException( 'Table collations do not match for some (or all) WP tables.' );
-		}
+	public function get_posts_rows_for_content_diff( string $posts_table, array $post_types, array $post_statuses ) {
+		// Get post types and statuses placeholders for $wpdb::prepare.
+		$post_types_placeholders        = array_fill( 0, count( $post_types ), '%s' );
+		$post_types_placeholders_csv    = implode( ',', $post_types_placeholders );
+		$post_statuses_placeholders     = array_fill( 0, count( $post_statuses ), '%s' );
+		$post_statuses_placeholders_csv = implode( ',', $post_statuses_placeholders );
 
-		$ids              = [];
-		$live_posts_table = esc_sql( $live_table_prefix ) . 'posts';
-		$posts_table      = $this->wpdb->prefix . 'posts';
-
-		// Split post types into two groups for memory usage reasons -- attachment and other types.
-		$post_type_attachment = null;
-		$key_attachment       = array_search( 'attachment', $post_types );
-		if ( false !== $key_attachment ) {
-			$post_type_attachment = 'attachment';
-			unset( $post_types[ $key_attachment ] );
-		}
-		$post_types_other = $post_types;
-
-
-		// Get post types except attachments.
-		if ( ! empty( $post_types_other ) ) {
-
-			// Get post type placeholders for $wpdb::prepare.
-			$post_types_other_placeholders     = array_fill( 0, count( $post_types_other ), '%s' );
-			$post_types_other_placeholders_csv = implode( ',', $post_types_other_placeholders );
-
-			WP_CLI::log( sprintf( 'Querying %s types ...', implode( ',', $post_types_other ) ) );
-			// $wpdb->prepare can't handle table names, so we'll additionally str_replace {TABLE}.
-			// phpcs:disable
-			$sql_replace_table = $this->wpdb->prepare(
-				"SELECT ID, post_name, post_title, post_status, post_date
+		// $wpdb->prepare can't handle table names, so we'll additionally str_replace {TABLE}.
+		// phpcs:disable
+		$sql_replace_table = $this->wpdb->prepare(
+			"SELECT ID, post_name, post_title, post_status, post_type, post_date, post_modified
 				FROM {TABLE}
-				WHERE post_type IN ( $post_types_other_placeholders_csv )
-				AND post_status IN ( 'publish', 'future', 'draft', 'pending', 'private' );",
-				$post_types_other
-			);
-			$results_live_posts  = $this->wpdb->get_results(  str_replace( '{TABLE}', $live_posts_table, $sql_replace_table), ARRAY_A );
-			$results_local_posts = $this->wpdb->get_results( str_replace( '{TABLE}', $posts_table, $sql_replace_table), ARRAY_A );
-			// phpcs:enable
+				WHERE post_type IN ( $post_types_placeholders_csv )
+				AND post_status IN ( $post_statuses_placeholders_csv );",
+			array_merge( $post_types, $post_statuses )
+		);
+		$posts_table_escaped = esc_sql( $posts_table );
+		$results             = $this->wpdb->get_results(  str_replace( '{TABLE}', $posts_table_escaped, $sql_replace_table), ARRAY_A );
 
-			// Search unique on live.
-			$percent_progress = null;
-			WP_CLI::log( sprintf( 'Searching for new %s from total %s...', implode( ',', $post_types_other ), count( $results_live_posts ) ) );
-			foreach ( $results_live_posts as $key_live_post => $live_post ) {
+		// Return empty array instead of null.
+		$results = is_null( $results ) ? [] : $results;
 
-				// Get and output progress meter by 10%.
-				$last_percent_progress = $percent_progress;
-				$this->get_progress_percentage( count( $results_live_posts ), $key_live_post + 1, 10, $percent_progress );
-				if ( $last_percent_progress !== $percent_progress ) {
-					WP_CLI::log( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : '.' ) );
-				}
+		return $results;
+	}
 
-				$found = false;
-				foreach ( $results_local_posts as $key_local_post => $local_post ) {
-					if (
-						$live_post['post_name'] == $local_post['post_name']
-						&& $live_post['post_title'] == $local_post['post_title']
-						&& $live_post['post_status'] == $local_post['post_status']
-						&& $live_post['post_date'] == $local_post['post_date']
-					) {
-						$found = true;
-						break;
-					}
-				}
+	/**
+	 * Gets a list of all Attachments imported by Content Diff, "old_id"=>"new_id" IDs mapping from the postmeta.
+	 *
+	 * @return array Imported attachment IDs, keys are old/live IDs, values are new/local/Staging IDs.
+	 */
+	public function get_imported_attachment_id_mapping_from_db(): array {
 
-				if ( true === $found ) {
-					// Unset record that was just matched for faster following searches.
+		$attachment_ids_map = [];
+
+		$results = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT wpm.post_id, wpm.meta_value
+					FROM {$this->wpdb->postmeta} wpm
+					JOIN {$this->wpdb->posts} wp ON wp.ID = wpm.post_id
+					WHERE wpm.meta_key = %s
+					AND wp.post_type = 'attachment';",
+				self::SAVED_META_LIVE_POST_ID,
+			),
+			ARRAY_A
+		);
+		foreach ( $results as $result ) {
+			$attachment_ids_map[ $result['meta_value'] ] = $result['post_id'];
+		}
+
+		return $attachment_ids_map;
+	}
+
+	/**
+	 * Gets an array of all Post IDs imported by Content Diff, their "old_id"=>"new_id" from the postmeta.
+	 *
+	 * @return array Imported post and pages IDs, keys are old/live IDs, values are new/local/Staging IDs.
+	 */
+	public function get_imported_post_id_mapping_from_db( $post_types = [ 'post', 'page' ] ): array {
+
+		$post_ids_map = [];
+
+		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared -- placeholders generated dynamically.
+		$post_types_placeholders = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
+		$results = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT wpm.post_id, wpm.meta_value
+					FROM {$this->wpdb->postmeta} wpm
+					JOIN {$this->wpdb->posts} wp ON wp.ID = wpm.post_id
+					WHERE wpm.meta_key = %s
+					AND wp.post_type IN ( {$post_types_placeholders} );",
+				array_merge(
+					[ self::SAVED_META_LIVE_POST_ID ] ,
+					$post_types
+				)
+			),
+			ARRAY_A
+		);
+		// phpcs:disable
+
+		foreach ( $results as $result ) {
+			$post_ids_map[ $result['meta_value'] ] = $result['post_id'];
+		}
+
+		return $post_ids_map;
+	}
+
+	/**
+	 * Finds unique records in live posts table which don't exist in local posts table.
+	 * Uses programmatic approach which requires less memory, but is a bit slower to run.
+	 *
+	 * Outputs progress by 10% increments to the CLI.
+	 *
+	 * @param array $results_live_posts  Rows from live posts table.
+	 * @param array $results_local_posts Rows from local posts table.
+	 *
+	 * @return array IDs of posts found.
+	 */
+	public function filter_new_live_ids( array $results_live_posts, array $results_local_posts ): array {
+		// Search unique on live.
+		$ids = [];
+
+		$percent_progress = null;
+		foreach ( $results_live_posts as $key_live_post => $live_post ) {
+
+			// Output progress meter by 10% increments.
+			$last_percent_progress = $percent_progress;
+			$this->get_progress_percentage( count( $results_live_posts ), $key_live_post + 1, 10, $percent_progress );
+			if ( $last_percent_progress !== $percent_progress ) {
+				PHPUtil::echo_stdout( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : ".\n" ) );
+			}
+
+			$found = false;
+			foreach ( $results_local_posts as $key_local_post => $local_post ) {
+				if (
+					$live_post['post_name'] == $local_post['post_name']
+					&& $live_post['post_title'] == $local_post['post_title']
+					&& $live_post['post_type'] == $local_post['post_type']
+					&& $live_post['post_status'] == $local_post['post_status']
+					&& $live_post['post_date'] == $local_post['post_date']
+				) {
+					// Remove the local post which was found (break; was done), to make the next search a bit faster.
 					unset( $results_local_posts[ $key_local_post ] );
-				} else {
-					// Unique on live, add to $ids.
-					$ids[] = $live_post['ID'];
+
+					$found = true;
+					break;
 				}
 			}
 
-			// Garbage collection should be faster for setting to null VS using \unset().
-			$results_live_posts  = null;
-			$results_local_posts = null;
-		}
-
-
-		// Get attachments.
-		if ( ! is_null( $post_type_attachment ) ) {
-
-			WP_CLI::log( 'Querying attachments ...' );
-			// $wpdb->prepare can't handle table names, so we'll additionally str_replace {TABLE}.
-			$sql_replace_table = "SELECT ID, post_name, post_title, post_status, post_date
-				FROM {TABLE}
-				WHERE post_type = 'attachment';";
-			// phpcs:disable
-			$results_live_attachments  = $this->wpdb->get_results( str_replace( '{TABLE}', $live_posts_table, $sql_replace_table ), ARRAY_A );
-			$results_local_attachments = $this->wpdb->get_results( str_replace( '{TABLE}', $posts_table, $sql_replace_table ), ARRAY_A );
-			// phpcs:enable
-
-			// Search unique attachments on live.
-			WP_CLI::log( sprintf( 'Searching for new attachments from total %s...', count( $results_live_attachments ) ) );
-			$percent_progress = null;
-			foreach ( $results_live_attachments as $key_live_attachment => $live_attachment ) {
-
-				// Get and output progress meter by 10%.
-				$last_percent_progress = $percent_progress;
-				$this->get_progress_percentage( count( $results_live_attachments ), $key_live_attachment + 1, 10, $percent_progress );
-				if ( $last_percent_progress !== $percent_progress ) {
-					WP_CLI::log( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : '.' ) );
-				}
-
-				$found = false;
-				foreach ( $results_local_attachments as $key_local_attachment => $local_attachment ) {
-					if (
-						$live_attachment['post_name'] == $local_attachment['post_name']
-						&& $live_attachment['post_title'] == $local_attachment['post_title']
-						&& $live_attachment['post_status'] == $local_attachment['post_status']
-						&& $live_attachment['post_date'] == $local_attachment['post_date']
-					) {
-						$found = true;
-						break;
-					}
-				}
-
-				// Unset record that was just matched for faster following searches.
-				if ( true === $found ) {
-					unset( $results_local_attachments[ $key_local_attachment ] );
-				} else {
-					// Unset record that was just matched for faster following searches.
-					$ids[] = $live_attachment['ID'];
-				}
+			// Unique on live, add to $ids.
+			if ( false === $found ) {
+				$ids[] = $live_post['ID'];
 			}
 		}
 
 		return $ids;
+	}
+
+	/**
+	 * Finds records in live posts table which have a newer post_modified date.
+	 * Uses programmatic approach which requires less memory, but is a bit slower to run.
+	 *
+	 * Outputs progress by 10% increments to the CLI.
+	 *
+	 * @param array $results_live_posts  Rows from live posts table.
+	 * @param array $results_local_posts Rows from local posts table.
+	 *
+	 * @return array $ids_modified {
+	 *     IDs of posts found.
+	 *
+	 *     @type int live_id  Live Post ID.
+	 *     @type int local_id Matching Local Post ID.
+	 * }
+	 */
+	public function filter_modified_live_ids( array $results_live_posts, array $results_local_posts ): array {
+
+		// Check if modified date is different. Posts which were already imported with Content Diff will have the original meta ID.
+		// But posts which were imported just by raw table import won't have the meta. So a full comparisson is needed.
+		$ids_modified = [];
+
+		$percent_progress = null;
+		foreach ( $results_live_posts as $key_live_post => $live_post ) {
+
+			// Output progress meter by 10% increments.
+			$last_percent_progress = $percent_progress;
+			$this->get_progress_percentage( count( $results_live_posts ), $key_live_post + 1, 10, $percent_progress );
+			if ( $last_percent_progress !== $percent_progress ) {
+				PHPUtil::echo_stdout( $percent_progress . '%' . ( ( $percent_progress < 100 ) ? '... ' : ".\n" ) );
+			}
+
+			$modified = false;
+			foreach ( $results_local_posts as $key_local_post => $local_post ) {
+				if (
+					$live_post['post_name'] == $local_post['post_name']
+					&& $live_post['post_title'] == $local_post['post_title']
+					&& $live_post['post_status'] == $local_post['post_status']
+					&& $live_post['post_date'] == $local_post['post_date']
+					&& $live_post['post_modified'] > $local_post['post_modified']
+				) {
+					$modified = true;
+					break;
+				}
+			}
+
+			// Modified on live, add to $ids_modified.
+			if ( true === $modified ) {
+				$ids_modified[] = [
+					'live_id'  => (int) $live_post['ID'],
+					'local_id' => (int) $local_post['ID'],
+				];
+			}
+		}
+
+		return $ids_modified;
 	}
 
 	/**
@@ -416,12 +483,13 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Checks local Categories, and returns those which might have wrong parent term_ids that don't exist.
+	 * Checks local Hierarchical Taxonomies, and returns those which might have wrong parent term_ids that don't exist.
 	 *
 	 * @param string $table_prefix DB table prefix which is to be used for this query.
+	 * @param array  $taxonomies_to_check Hierarchical Taxonomies to check.
 	 *
 	 * @return array $args {
-	 *     Categories which have nonexistent parent term_id.
+	 *     Hierarchical Taxonomies which have nonexistent parent term_id.
 	 *
 	 *     @type string term_id          wp_terms.term_id.
 	 *     @type string name             wp_terms.name.
@@ -431,25 +499,30 @@ class ContentDiffMigrator {
 	 *     @type string parent           wp_termtaxonomy.parent which is not found in wp_terms and is wrong.
 	 * }
 	 */
-	public function get_categories_with_nonexistent_parents( $table_prefix ): array {
+	public function get_taxonomies_with_nonexistent_parents( $table_prefix, $taxonomies_to_check ): array {
 
 		$terms         = esc_sql( $table_prefix . 'terms' );
 		$term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
 
 		// phpcs:disable -- wpdb::prepare used by wrapper and query fully sanitized.
-		$categories_with_nonexistent_parents = $this->wpdb->get_results(
-			"SELECT t.term_id, t.name, t.slug, tt.term_taxonomy_id, tt.term_id, tt.taxonomy, tt.parent
-			FROM {$terms} t
-	        JOIN {$term_taxonomy} tt
-				ON t.term_id = tt.term_id AND tt.taxonomy = 'category' AND parent <> 0
-	        LEFT JOIN {$terms} ttparent
-				ON ttparent.term_id = tt.parent
-			WHERE ttparent.term_id IS NULL;",
+		$taxonomy_format = implode( ', ', array_fill( 0, count( $taxonomies_to_check ), '%s' ) );
+		$taxonomies_with_nonexistent_parents = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT t.term_id, t.name, t.slug, tt.term_taxonomy_id, tt.term_id, tt.taxonomy, tt.parent
+				FROM {$terms} t
+				JOIN {$term_taxonomy} tt
+					ON t.term_id = tt.term_id AND tt.taxonomy IN ($taxonomy_format) AND parent <> 0
+				LEFT JOIN {$terms} ttparent
+					ON ttparent.term_id = tt.parent
+				WHERE ttparent.term_id IS NULL;",
+				$taxonomies_to_check
+			)
+			,
 			ARRAY_A
 		);
 		// phpcs:enable
 
-		return $categories_with_nonexistent_parents;
+		return $taxonomies_with_nonexistent_parents;
 	}
 
 	/**
@@ -460,7 +533,7 @@ class ContentDiffMigrator {
 	 *
 	 * @return void
 	 */
-	public function reset_categories_parents( string $table_prefix, array $term_taxonomy_ids ): void {
+	public function reset_hierarchical_taxonomies_parents( string $table_prefix, array $term_taxonomy_ids ): void {
 		$placeholders  = implode( ',', array_fill( 0, count( $term_taxonomy_ids ), '%d' ) );
 		$term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
 		// phpcs:disable -- wpdb::prepare used by wrapper and query fully sanitized.
@@ -474,78 +547,102 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Recreates all categories from Live to local.
+	 * Recreates all hierarchical or non-hierarchical taxonomies from Live to local.
 	 *
 	 * @param string $live_table_prefix Live DB table prefix.
+	 * @param array  $hierarchical_taxonomies_to_migrate Hierarchical taxonomies to migrate.
 	 *
-	 * @return array Map of all live to local categories. Keys are live category term_ids, and values are their corresponding
+	 * @return array Map of all live to local hierarchical taxonomies. Keys are live category term_ids, and values are their corresponding
 	 *               local category term_ids.
 	 */
-	public function recreate_categories( $live_table_prefix ) {
+	public function recreate_hierarchical_taxonomies( $live_table_prefix, $hierarchical_taxonomies_to_migrate ) {
 		$table_prefix             = $this->wpdb->prefix;
 		$live_terms_table         = esc_sql( $live_table_prefix . 'terms' );
 		$live_termstaxonomy_table = esc_sql( $live_table_prefix . 'term_taxonomy' );
 
-		// Get all live site's hierarchical categories, ordered by parent for easy hierarchical reconstruction.
+		// Get all live site's hierarchical hierarchical taxonomies, ordered by parent for easy hierarchical reconstruction.
 		// phpcs:disable -- wpdb::prepare is used by wrapper.
-		$live_categories = $this->wpdb->get_results(
-			"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
-			FROM $live_terms_table t
-	        JOIN $live_termstaxonomy_table tt ON t.term_id = tt.term_id
-			WHERE tt.taxonomy IN ( 'category' )
-			ORDER BY tt.parent;",
+		$taxonomy_format = implode( ', ', array_fill( 0, count( $hierarchical_taxonomies_to_migrate ), '%s' ) );
+		$live_hierarchical_taxonomies = $this->wpdb->get_results(
+			$this->wpdb->prepare(
+				"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
+				FROM $live_terms_table t
+				JOIN $live_termstaxonomy_table tt ON t.term_id = tt.term_id
+				WHERE tt.taxonomy IN ($taxonomy_format)
+				ORDER BY tt.parent;",
+				$hierarchical_taxonomies_to_migrate
+			),
 			ARRAY_A
 		);
 		// phpcs:enable
 
-		// Go through all the $live_taxonomies and get or create them on local, and mark their term_id changes in $category_term_id_updates.
-		$category_term_id_updates = [];
-		foreach ( $live_categories as $live_category ) {
-			$live_category_tree    = $this->get_category_tree( $live_table_prefix, $live_category );
-			$created_category_tree = $this->get_or_create_category_tree( $table_prefix, $live_category_tree );
+		// Go through all the $live_taxonomies and get or create them on local, and mark their term_id changes in $hierarchical_taxonomy_term_id_updates.
+		$hierarchical_taxonomy_term_id_updates = [];
+		foreach ( $live_hierarchical_taxonomies as $live_hierarchical_taxonomy ) {
+			$live_hierarchical_taxonomy_tree = $this->get_hierarchical_taxonomy_tree( $live_table_prefix, $live_hierarchical_taxonomy );
 
-			$category_term_id_updates[ $live_category['term_id'] ] = $created_category_tree['term_id'];
+			// Register taxonomy if not already registered needed (init action not executed at this point, and it just needs to be register it for the purpose of this plugin).
+			if ( ! taxonomy_exists( $live_hierarchical_taxonomy_tree['taxonomy'] ) ) {
+				$registered_taxonomy = register_taxonomy(
+					$live_hierarchical_taxonomy_tree['taxonomy'],
+					'post',
+					[
+						'taxonomy'     => $live_hierarchical_taxonomy_tree['taxonomy'],
+						'description'  => $live_hierarchical_taxonomy_tree['taxonomy'],
+						'count'        => $live_hierarchical_taxonomy_tree['count'],
+						'public'       => true,
+						'hierarchical' => true,
+					]
+				);
+				if ( is_wp_error( $registered_taxonomy ) ) {
+					WP_CLI::error( 'Failed to register taxonomy ' . $live_hierarchical_taxonomy_tree['taxonomy'] . ' error: ' . $registered_taxonomy->get_error_message() );
+				}
+			}
+
+			$created_hierarchical_taxonomy_tree = $this->get_or_create_hierarchical_taxonomy_tree( $table_prefix, $live_hierarchical_taxonomy_tree );
+
+			$hierarchical_taxonomy_term_id_updates[ $live_hierarchical_taxonomy['term_id'] ] = $created_hierarchical_taxonomy_tree['term_id'];
 		}
 
-		return $category_term_id_updates;
+		return $hierarchical_taxonomy_term_id_updates;
 	}
 
 	/**
-	 * Fetches the category's tree by retrieving all the parent categories down to the top parent.
+	 * Fetches the hierarchical taxonomy's tree by retrieving all the parent hierarchical taxonomies down to the top parent.
 	 *
 	 * @param string $table_prefix DB table prefix.
-	 * @param array  $category {
-	 *    Category data array.
+	 * @param array  $hierarchical_taxonomy {
+	 *    Hierarchical taxonomy data array.
 	 *
-	 *     @type string term_id     Category term_id.
-	 *     @type string taxonomy    Should always be 'category'.
-	 *     @type string name        Category name.
-	 *     @type string slug        Category slug.
-	 *     @type string description Category description.
-	 *     @type string count       Category count.
-	 *     @type string parent      Category parent term_id.
+	 *     @type string term_id     Hierarchical taxonomy term_id.
+	 *     @type string taxonomy    Should always be a hierarchical taxonomy.
+	 *     @type string name        Hierarchical taxonomy name.
+	 *     @type string slug        Hierarchical taxonomy slug.
+	 *     @type string description Hierarchical taxonomy description.
+	 *     @type string count       Hierarchical taxonomy count.
+	 *     @type string parent      Hierarchical taxonomy parent term_id.
 	 * }
 	 *
 	 * @return array {
-	 *     A nested array of categories, where 'parent' key is either another subarray category, or '0' if no parent.
+	 *     A nested array of hierarchical taxonomies, where 'parent' key is either another subarray hierarchical taxonomy, or '0' if no parent.
 	 *
-	 *     @type string       term_id     Category term_id.
-	 *     @type string       taxonomy    Should always be 'category'.
-	 *     @type string       name        Category name.
-	 *     @type string       slug        Category slug.
-	 *     @type string       description Category description.
-	 *     @type string       count       Category count.
-	 *     @type string|array parent      Either nested parent subarray category containing all the same keys and values, or '0'.
+	 *     @type string       term_id     Hierarchical taxonomy term_id.
+	 *     @type string       taxonomy    Should always be a hierarchical taxonomy.
+	 *     @type string       name        Hierarchical taxonomy name.
+	 *     @type string       slug        Hierarchical taxonomy slug.
+	 *     @type string       description Hierarchical taxonomy description.
+	 *     @type string       count       Hierarchical taxonomy count.
+	 *     @type string|array parent      Either nested parent subarray hierarchical taxonomy containing all the same keys and values, or '0'.
 	 * }
 	 */
-	public function get_category_tree( $table_prefix, $category ) {
+	public function get_hierarchical_taxonomy_tree( $table_prefix, $hierarchical_taxonomy ) {
 
-		$category_tree = $category;
+		$hierarchical_taxonomy_tree = $hierarchical_taxonomy;
 
 		$table_terms         = esc_sql( $table_prefix . 'terms' );
 		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
 
-		$parent_term_id = $category['parent'];
+		$parent_term_id = $hierarchical_taxonomy['parent'];
 		if ( 0 != $parent_term_id ) {
 			// phpcs:disable -- wpdb::prepare used by wrapper.
 			$parent_row = $this->wpdb->get_row(
@@ -553,132 +650,109 @@ class ContentDiffMigrator {
 					"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
 					FROM {$table_terms} t
 			        JOIN {$table_term_taxonomy} tt ON t.term_id = tt.term_id
-					WHERE tt.taxonomy IN ( 'category' )
+					WHERE tt.taxonomy = %s
 					AND t.term_id = %s
 					ORDER BY tt.parent;",
-					$parent_term_id
+					[ $hierarchical_taxonomy['taxonomy'], $parent_term_id ]
 				),
 				ARRAY_A
 			);
 			// phpcs:enable
 
-			// This is either root category, or go level up recursively.
+			// This is either root taxonomy, or go level up recursively.
 			if ( 0 == $parent_row['parent'] ) {
-				$category_tree['parent'] = $parent_row;
+				$hierarchical_taxonomy_tree['parent'] = $parent_row;
 			} else {
-				$category_tree['parent'] = $this->get_category_tree( $table_prefix, $parent_row );
+				$hierarchical_taxonomy_tree['parent'] = $this->get_hierarchical_taxonomy_tree( $table_prefix, $parent_row );
 			}
 		}
 
-		return $category_tree;
+		return $hierarchical_taxonomy_tree;
 	}
 
 	/**
-	 * Rebuilds the full tree of a category. Either taxes an existing category, or creates it.
+	 * Rebuilds the full tree of a hierarchical taxonomy. Either taxes an existing hierarchical taxonomy, or creates it.
 	 *
 	 * @param string $table_prefix  DB table prefix.
-	 * @param array  $category_tree {
-	 *     A nested array of categories, where 'parent' key is either another subarray category, or '0' if no parent.
+	 * @param array  $hierarchical_taxonomy_tree {
+	 *     A nested array of hierarchical taxonomies, where 'parent' key is either another subarray hierarchical taxonomy, or '0' if no parent.
 	 *     This is being read as a parameter and will be rebuilt node by node.
 	 *
-	 *     @type string       term_id     Category term_id.
-	 *     @type string       taxonomy    Should always be 'category'.
-	 *     @type string       name        Category name.
-	 *     @type string       slug        Category slug.
-	 *     @type string       description Category description.
-	 *     @type string       count       Category count.
-	 *     @type string|array parent      Either nested parent subarray category containing all the same keys and values, or '0'.
+	 *     @type string       term_id     Hierarchical Taxonomy term_id.
+	 *     @type string       taxonomy    Should always be a hierarchical taxonomy.
+	 *     @type string       name        Hierarchical Taxonomy name.
+	 *     @type string       slug        Hierarchical Taxonomy slug.
+	 *     @type string       description Hierarchical Taxonomy description.
+	 *     @type string       count       Hierarchical Taxonomy count.
+	 *     @type string|array parent      Either nested parent subarray hierarchical taxonomy containing all the same keys and values, or '0'.
 	 * }
 	 *
 	 * @return array {
-	 *     A nested array of categories, where 'parent' key is either another subarray category, or '0' if no parent.
-	 *     This is the resulting category tree, either existing categories fetched or new ones created.
+	 *     A nested array of hierarchical taxonomies, where 'parent' key is either another subarray hierarchical taxonomy, or '0' if no parent.
+	 *     This is the resulting hierarchical taxonomy tree, either existing hierarchical taxonomies fetched or new ones created.
 	 *
-	 *     @type string       term_id     Category term_id.
-	 *     @type string       taxonomy    Should always be 'category'.
-	 *     @type string       name        Category name.
-	 *     @type string       slug        Category slug.
-	 *     @type string       description Category description.
-	 *     @type string       count       Category count.
-	 *     @type string|array parent      Either nested parent subarray category containing all the same keys and values, or '0'.
+	 *     @type string       term_id     Hierarchical Taxonomy term_id.
+	 *     @type string       taxonomy    Should always be a hierarchical taxonomy.
+	 *     @type string       name        Hierarchical Taxonomy name.
+	 *     @type string       slug        Hierarchical Taxonomy slug.
+	 *     @type string       description Hierarchical Taxonomy description.
+	 *     @type string       count       Hierarchical Taxonomy count.
+	 *     @type string|array parent      Either nested parent subarray hierarchical taxonomy containing all the same keys and values, or '0'.
 	 * }
 	 */
-	public function get_or_create_category_tree( $table_prefix, $category_tree ) {
+	public function get_or_create_hierarchical_taxonomy_tree( $table_prefix, $hierarchical_taxonomy_tree ) {
+		// If this is the top parent hierarchical taxonomy, get or create it.
+		if ( 0 == $hierarchical_taxonomy_tree['parent'] ) {
 
-		$table_terms         = esc_sql( $table_prefix . 'terms' );
-		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
-
-		// If this is the top parent category, get or create it.
-		if ( 0 == $category_tree['parent'] ) {
-
-			// Get or create this top parent category.
-			$category_top_parent_row     = $this->get_category_array_by_name_description_and_parent( $table_prefix, $category_tree['name'], $category_tree['description'], 0 );
-			$category_top_parent_term_id = $category_top_parent_row['term_id'] ?? null;
-			if ( ! $category_top_parent_term_id ) {
+			// Get or create this top parent hierarchical taxonomy.
+			$hierarchical_taxonomy_top_parent_row     = $this->get_hierarchical_taxonomy_array_by_name_and_parent( $table_prefix, $hierarchical_taxonomy_tree['name'], $hierarchical_taxonomy_tree['taxonomy'], 0 );
+			$hierarchical_taxonomy_top_parent_term_id = $hierarchical_taxonomy_top_parent_row['term_id'] ?? null;
+			if ( ! $hierarchical_taxonomy_top_parent_term_id ) {
 				// Insert it if it doesn't exist.
-				$category_top_parent_term_id = $this->wp_insert_category(
-					$table_prefix,
-					[
-						'cat_name'             => $category_tree['name'],
-						'category_description' => $category_tree['description'],
-						'category_parent'      => 0,
-					]
+				$hierarchical_taxonomy_top_parent_term_id = $this->wp_insert_or_update_term(
+					$hierarchical_taxonomy_tree['name'],
+					$hierarchical_taxonomy_tree['description'],
+					0,
+					$hierarchical_taxonomy_tree['taxonomy']
 				);
 			}
-			// Get this parent category's full array.
-			$category_top_parent = $this->get_category_array_by_term_id( $table_prefix, $category_top_parent_term_id );
-
-			return $category_top_parent;
-		}
-
-		// If this is not top parent category, keep going deeper recursively until reaching it.
-		if ( 0 != $category_tree['parent'] ) {
-			$current_parent_tree = $this->get_or_create_category_tree( $table_prefix, $category_tree['parent'] );
-		}
-
-		// For a non-top-parent category, get or create its tree and return.
-		$category_row     = $this->get_category_array_by_name_description_and_parent( $table_prefix, $category_tree['name'], $category_tree['description'], $current_parent_tree['term_id'] );
-		$category_term_id = $category_row['term_id'] ?? null;
-		if ( ! $category_term_id ) {
-			$category_term_id = $this->wp_insert_category(
+			// Get this parent taxonomy's full array.
+			$hierarchical_taxonomy_top_parent = $this->get_term_and_taxonomy_array(
 				$table_prefix,
-				[
-					'cat_name'             => $category_tree['name'],
-					'category_description' => $category_tree['description'],
-					'category_parent'      => $current_parent_tree['term_id'],
-				]
+				[ 'term_id' => $hierarchical_taxonomy_top_parent_term_id ],
+				$hierarchical_taxonomy_tree['taxonomy']
+			);
+
+			return $hierarchical_taxonomy_top_parent;
+		}
+
+		// If this is not top parent taxonomy, keep going deeper recursively until reaching it.
+		if ( 0 != $hierarchical_taxonomy_tree['parent'] ) {
+			$current_parent_tree = $this->get_or_create_hierarchical_taxonomy_tree( $table_prefix, $hierarchical_taxonomy_tree['parent'] );
+		}
+
+		// For a non-top-parent taxonomy, get or create its tree and return.
+		$taxonomy_row     = $this->get_hierarchical_taxonomy_array_by_name_and_parent( $table_prefix, $hierarchical_taxonomy_tree['name'], $hierarchical_taxonomy_tree['taxonomy'], $current_parent_tree['term_id'] );
+		$taxonomy_term_id = $taxonomy_row['term_id'] ?? null;
+		if ( ! $taxonomy_term_id ) {
+			$taxonomy_term_id = $this->wp_insert_or_update_term(
+				$hierarchical_taxonomy_tree['name'],
+				$hierarchical_taxonomy_tree['description'],
+				$current_parent_tree['term_id'],
+				$hierarchical_taxonomy_tree['taxonomy']
 			);
 		}
-		$category = $this->get_category_array_by_term_id( $table_prefix, $category_term_id );
+		$taxonomy = $this->get_term_and_taxonomy_array(
+			$table_prefix,
+			[ 'term_id' => $taxonomy_term_id ],
+			$hierarchical_taxonomy_tree['taxonomy']
+		);
 
-		// This is the reubuilt category tree.
-		$rebuilt_category_tree           = $category;
-		$rebuilt_category_tree['parent'] = $current_parent_tree;
+		// This is the reubuilt taxonomy tree.
+		$rebuilt_hierarchical_taxonomy_tree           = $taxonomy;
+		$rebuilt_hierarchical_taxonomy_tree['parent'] = $current_parent_tree;
 
-		return $rebuilt_category_tree;
-	}
-
-	/**
-	 * Gets a category array with all the related data by term_id.
-	 *
-	 * @param string $table_prefix DB table prefix.
-	 * @param string $term_id      term_id.
-	 *
-	 * @return array {
-	 *     @type string term_id     Category term_id.
-	 *     @type string taxonomy    Should always be 'category'.
-	 *     @type string name        Category name.
-	 *     @type string slug        Category slug.
-	 *     @type string description Category description.
-	 *     @type string count       Category count.
-	 *     @type string parent      Category parent's term_id.
-	 * }
-	 */
-	public function get_category_array_by_term_id( $table_prefix, $term_id ) {
-
-		$category_data = $this->get_term_and_taxonomy_array( $table_prefix, [ 'term_id' => $term_id ], 'category' );
-
-		return $category_data;
+		return $rebuilt_hierarchical_taxonomy_tree;
 	}
 
 	/**
@@ -734,61 +808,132 @@ class ContentDiffMigrator {
 	}
 
 	/**
-	 * Gets a category array with all the related data.
+	 * Gets hierarchical taxonomy by its name and parent.
 	 *
-	 * @param string $table_prefix    DB table prefix.
-	 * @param string $cat_name        Category name.
-	 * @param string $cat_description Category description.
-	 * @param string $cat_parent      Category parent's term_id.
+	 * @param string $table_prefix          DB table prefix.
+	 * @param string $taxonomy_name         Hierarchical Taxonomy name.
+	 * @param string $taxonomy              Hierarchical Taxonomy.
+	 * @param string $taxonomy_parent       Hierarchical Taxonomy parent's term_id.
 	 *
 	 * @return array {
-	 *     @type string term_id     Category term_id.
-	 *     @type string taxonomy    Should always be 'category'.
-	 *     @type string name        Category name.
-	 *     @type string slug        Category slug.
-	 *     @type string description Category description.
-	 *     @type string count       Category count.
-	 *     @type string parent      Category parent's term_id.
+	 *     @type string term_id     Hierarchical Taxonomy term_id.
+	 *     @type string taxonomy    Should always be a hierarchical taxonomy.
+	 *     @type string name        Hierarchical Taxonomy name.
+	 *     @type string slug        Hierarchical Taxonomy slug.
+	 *     @type string description Hierarchical Taxonomy description.
+	 *     @type string count       Hierarchical Taxonomy count.
+	 *     @type string parent      Hierarchical Taxonomy parent's term_id.
 	 * }
 	 */
-	public function get_category_array_by_name_description_and_parent( $table_prefix, $cat_name, $cat_description, $cat_parent ) {
+	public function get_hierarchical_taxonomy_array_by_name_and_parent( $table_prefix, $taxonomy_name, $taxonomy, $taxonomy_parent ) {
 		$table_terms         = esc_sql( $table_prefix . 'terms' );
 		$table_term_taxonomy = esc_sql( $table_prefix . 'term_taxonomy' );
 
 		// phpcs:disable -- wpdb::prepare used by wrapper.
-		$category = $this->wpdb->get_row(
+		$hierarchical_taxonomy = $this->wpdb->get_row(
 			$this->wpdb->prepare(
 				"SELECT t.term_id, tt.taxonomy, t.name, t.slug, tt.parent, tt.description, tt.count
 					FROM $table_terms t
 			        JOIN $table_term_taxonomy tt ON t.term_id = tt.term_id
-					WHERE tt.taxonomy = 'category'
+					WHERE tt.taxonomy = %s
 					AND tt.parent = %s
-					AND t.name = %s
-					AND tt.description = %s;",
-				$cat_parent,
-				$cat_name,
-				$cat_description
+					AND t.name = %s;",
+				$taxonomy,
+				$taxonomy_parent,
+				$taxonomy_name
 			),
 			ARRAY_A
 		);
 		// phpcs:enable
 
-		return $category;
+		return $hierarchical_taxonomy;
 	}
 
 	/**
-	 * A wrapper for \wp_insert_category().
+	 * Create a term in a hierarchical taxonomy, or update it if it already exists.
 	 *
-	 * @param string $table_prefix DB table prefix.
-	 * @param array  $catarr       $catarr argument for \wp_insert_category(), see \wp_insert_category().
+	 * @param string $term_name         Term name.
+	 * @param string $term_description  Term description.
+	 * @param string $term_parent       Term parent's term_id.
+	 * @param string $taxonomy          Taxonomy.
 	 *
-	 * @return int|\WP_Error The ID number of the new or updated Category on success. Zero or a WP_Error on failure,
+	 * @return int|\WP_Error The ID number of the new or updated Term on success. Zero or a WP_Error on failure,
 	 *                       depending on param `$wp_error`.
 	 */
-	public function wp_insert_category( $table_prefix, $catarr ) {
-		$category_top_parent_term_id = wp_insert_category( $catarr );
+	public function wp_insert_or_update_term( $term_name, $term_description, $term_parent, $taxonomy ) {
+		// Check if the term already exists.
+		$term_exists = term_exists( $term_name, $taxonomy, $term_parent ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.term_exists_term_exists
 
-		return $category_top_parent_term_id;
+		// If the term doesn't exist, insert it.
+		if ( ! $term_exists ) {
+			$term_id = wp_insert_term(
+				$term_name,
+				$taxonomy,
+				[
+					'description' => $term_description,
+					'parent'      => $term_parent,
+				]
+			);
+
+			if ( is_wp_error( $term_id ) ) {
+				return $term_id;
+			}
+			return $term_id['term_id'];
+		}
+
+		// If the term exists, update it.
+		$term_id     = $term_exists['term_id'];
+		$term_update = wp_update_term(
+			$term_id,
+			$taxonomy,
+			[
+				'description' => $term_description,
+				'parent'      => $term_parent,
+			]
+		);
+
+		if ( is_wp_error( $term_update ) ) {
+			return $term_update;
+		}
+
+		return $term_id;
+	}
+
+	/**
+	 * Migrates all users from Live tables to local tables.
+	 *
+	 * @param string $live_table_prefix Live DB table prefix.
+	 *
+	 * @return array Map of all newly inserted users. Keys are Live wp_user.ID's, and values are newly inserted user IDs.
+	 * 
+	 * @throws RuntimeException If user insertion fails, gets thrown by insert_usermeta_row and insert_user.
+	 */
+	public function migrate_all_users( $live_table_prefix ) {
+		
+		// Keys are Live wp_user.IDs, and values are newly inserted user IDs.
+		$inserted_users_map = [];
+
+		$users_rows = $this->select( $live_table_prefix . 'users', [], $select_just_one_row = false );
+		foreach ( $users_rows as $user_row ) {
+			// Skip if user exists.
+			$user_existing = $this->get_user_by( 'login', $user_row['user_login'] );
+			if ( $user_existing instanceof WP_User ) {
+				continue;
+			}
+
+			// Get user metas.
+			$usermeta_rows = $this->select_usermeta_rows( $live_table_prefix, $user_row['ID'] );
+
+			// Insert user and user metas.
+			$user_id_new = $this->insert_user( $user_row );
+			foreach ( $usermeta_rows as $usermeta_row ) {
+				$this->insert_usermeta_row( $usermeta_row, $user_id_new );
+			}
+
+			$inserted_users_map[ $user_row['ID'] ] = $user_id_new;
+		}
+
+		return $inserted_users_map;
 	}
 
 	/**
@@ -798,12 +943,12 @@ class ContentDiffMigrator {
 	 * @param array $data                     Array containing all the data, @see
 	 *                                        \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::get_post_data
 	 *                                        for structure.
-	 * @param array $category_term_id_updates Category term_ids updates. Keys are old Live category term_ids, and values are
-	 *                                        corresponding Categories on local (Staging) term_ids.
+	 * @param array $hierarchical_taxonomy_term_id_updates Hierarchical Taxonomy term_ids updates. Keys are old Live hierarchical taxonomy term_ids, and values are
+	 *                                        corresponding Hierarchical Taxonomies on local (Staging) term_ids.
 	 *
 	 * @return array List of errors which occurred.
 	 */
-	public function import_post_data( $post_id, $data, $category_term_id_updates ) {
+	public function import_post_data( $post_id, $data, $hierarchical_taxonomy_term_id_updates ) {
 		$error_messages = [];
 
 		// Insert Post Metas.
@@ -908,16 +1053,22 @@ class ContentDiffMigrator {
 			}
 		}
 
-		// Import 'category' and 'post_tag' taxonomies.
+		// Import taxonomies.
 		$inserted_term_taxonomy_ids = [];
-		foreach ( $data[ self::DATAKEY_TERMRELATIONSHIPS ] as $key_term_relationship_row => $term_relationship_row ) {
+		foreach ( $data[ self::DATAKEY_TERMRELATIONSHIPS ] as $term_relationship_row ) {
 
 			$live_term_taxonomy_id  = $term_relationship_row['term_taxonomy_id'];
 			$live_term_taxonomy_row = $this->filter_array_element( $data[ self::DATAKEY_TERMTAXONOMY ], 'term_taxonomy_id', $live_term_taxonomy_id );
 			$live_term_id           = $live_term_taxonomy_row['term_id'];
-			$live_taxonomy          = $live_term_taxonomy_row['taxonomy'];
 			$live_term_row          = $this->filter_array_element( $data[ self::DATAKEY_TERMS ], 'term_id', $live_term_id );
-			$live_term_name         = $live_term_row['name'];
+
+			// Validate live term row, it could be missing or invalid.
+			if ( is_null( $live_term_row ) ) {
+				$error_messages[] = sprintf( 'Faulty term relationship record in live DB, term skipped: posts.ID=%d > term_relationships has term_taxonomy_id=%d > term_taxonomy has term_id=%d >> term_id does not exist in live DB table.', $data['post']['ID'], $live_term_taxonomy_id, $live_term_taxonomy_row['term_id'] );
+				continue;
+			}
+
+			$live_term_name = $live_term_row['name'];
 
 			// These are the values we're going to get first, then update.
 			$local_term_id             = null;
@@ -925,40 +1076,47 @@ class ContentDiffMigrator {
 			$local_term_taxonomy_count = null;
 			// Helper vars.
 			$local_term_taxonomy_data = null;
-			$local_term_name          = null;
 
-			// If it's a category, all of them have already been recreated on Staging -- see $category_term_id_updates. Now just get the local corresponding term_taxonomy_id for this $live_term_taxonomy_id.
-			if ( 'category' == $live_term_taxonomy_row['taxonomy'] ) {
+			// If it's a hierarchical taxonomy, all of them have already been recreated on Staging -- see $hierarchical_taxonomy_term_id_updates. Now just get the local corresponding term_taxonomy_id for this $live_term_taxonomy_id.
+			if ( is_taxonomy_hierarchical( $live_term_taxonomy_row['taxonomy'] ) ) {
 
-				$local_term_id             = $category_term_id_updates[ $live_term_id ];
-				$local_term_taxonomy_data  = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_id' => $local_term_id ], 'category' );
+				$local_term_id             = $hierarchical_taxonomy_term_id_updates[ $live_term_id ];
+				$local_term_taxonomy_data  = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_id' => $local_term_id ], $live_term_taxonomy_row['taxonomy'] );
 				$local_term_taxonomy_id    = $local_term_taxonomy_data['term_taxonomy_id'];
-				$local_term_name           = $local_term_taxonomy_data['name'];
 				$local_term_taxonomy_count = $local_term_taxonomy_data['count'];
 
-			} elseif ( 'post_tag' == $live_term_taxonomy_row['taxonomy'] ) {
+			} else {
 
-				// Get or insert this Tag.
-				$local_term_taxonomy_data = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_name' => $live_term_name ], 'post_tag' );
+				// Get or insert the taxonomy.
+				$local_term_taxonomy_data = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_name' => $live_term_name ], $live_term_taxonomy_row['taxonomy'] );
 				if ( is_null( $local_term_taxonomy_data ) || empty( $local_term_taxonomy_data ) ) {
 
-					// Create a new Tag.
-					$term_insert_result = $this->wp_insert_term( $live_term_name, 'post_tag' );
+					// Create a new Term.
+					$term_insert_result = $this->wp_insert_term( $live_term_name, $live_term_taxonomy_row['taxonomy'], [ 'description' => $live_term_taxonomy_row['description'] ] );
+					
 					if ( is_wp_error( $term_insert_result ) ) {
 						$error_messages[] = sprintf(
-							"Error occurred while inserting post_tag '%s' live_term_id=%s at live_post_ID=%s :%s",
+							"Error occurred while inserting %s '%s' live_term_id=%s at live_post_ID=%s :%s",
+							$live_term_taxonomy_row['taxonomy'],
 							$live_term_name,
 							$live_term_id,
 							$post_id,
 							$term_insert_result->get_error_message()
 						);
-
+						
 						continue;
 					}
 
+					/**
+					 * Update $hierarchical_taxonomy_term_id_updates which contains "old term ID" to "new term ID" (see this function's arguments in docblock for more info):
+					 *      - keys are old live hierarchical taxonomy term_ids
+					 *      - values are local (Staging) term_ids.
+					 */
+					$hierarchical_taxonomy_term_id_updates[ $live_term_taxonomy_row['term_id'] ] = $term_insert_result['term_id'];
+
 					$local_term_id             = $term_insert_result['term_id'];
 					$local_term_taxonomy_id    = $term_insert_result['term_taxonomy_id'];
-					$local_term_taxonomy_data  = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_id' => $local_term_id ], 'post_tag' );
+					$local_term_taxonomy_data  = $this->get_term_and_taxonomy_array( $this->wpdb->prefix, [ 'term_id' => $local_term_id ], $live_term_taxonomy_row['taxonomy'] );
 					$local_term_taxonomy_count = $local_term_taxonomy_data['count'];
 
 				} else {
@@ -972,8 +1130,8 @@ class ContentDiffMigrator {
 
 			/**
 			 * We need to check if the same $local_term_taxonomy_id has already been inserted. This can happen if there are two
-			 * tags which have the same name but different case, e.g. first tag with name 'reseñas' and second with name 'Reseñas'.
-			 * WP distinguishes these Tags, but we should clean them up as we get the chance and merge them.
+			 * terms which have the same name but different case, e.g. first term with name 'reseñas' and second with name 'Reseñas'.
+			 * WP distinguishes these Terms, but we should clean them up as we get the chance and merge them.
 			 */
 			$term_relationship_is_double = in_array( $local_term_taxonomy_id, $inserted_term_taxonomy_ids );
 
@@ -981,8 +1139,15 @@ class ContentDiffMigrator {
 				// Insert the Term Relationship record.
 				$this->insert_term_relationship( $post_id, $local_term_taxonomy_id );
 
-				// Increment wp_term_taxonomy.count.
-				$this->wpdb->update( $this->wpdb->term_taxonomy, [ 'count' => ( (int) $local_term_taxonomy_count + 1 ) ], [ 'term_taxonomy_id' => $local_term_taxonomy_id ] );
+				// Increment wp_term_taxonomy.count, and update wp_term_taxonomy.description.
+				$this->wpdb->update(
+					$this->wpdb->term_taxonomy,
+					[
+						'count'       => ( (int) $local_term_taxonomy_count + 1 ),
+						'description' => $live_term_taxonomy_row['description'],
+					],
+					[ 'term_taxonomy_id' => $local_term_taxonomy_id ]
+				);
 
 				$inserted_term_taxonomy_ids[] = $local_term_taxonomy_id;
 			}
@@ -1004,56 +1169,83 @@ class ContentDiffMigrator {
 	/**
 	 * Updates Posts' Thumbnail IDs with new Thumbnail IDs after insertion.
 	 *
-	 * @param array  $imported_post_ids_map   Keys are Post IDs on Live Site, values are Post IDs of imported posts on Local Site.
-	 *                                        Will only update attachments for these Posts (e.g. an existing Post could
-	 *                                        legitimately have an att.ID 123, and then another newly imported Post could also have
-	 *                                        had att.ID 123 which has changed to 456 after import. We only want to update the
-	 *                                        newly imported Post's att.ID from 123 to 456, not the existing Post's.
-	 * @param array  $old_attachment_ids      Attachment IDs which could possibly be Featured Images and need to be updated to new IDs.
-	 * @param array  $imported_attachment_ids Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
-	 * @param string $log_file_path           Optional. Full path to a log file. If provided, the method will save and append a
-	 *                                        detailed output of all the changes made.
+	 * @param array  $imported_post_ids           Imported local Post IDs.
+	 * @param array  $imported_attachment_ids_map Keys are IDs on Live Site, values are IDs of imported posts on Local Site.
+	 * @param string $log_file_path               Optional. Full path to a log file. If provided, the method will save and append
+	 *                                            a detailed output of all the changes made.
+	 * @param bool   $dry_run                     If true, will not make changes to DB, and will output changes to CLI instead of
+	 *                                            saving them to $log_file_path.
 	 */
-	public function update_featured_images( $imported_post_ids_map, $old_attachment_ids, $imported_attachment_ids, $log_file_path ) {
-		if ( empty( $old_attachment_ids ) || empty( $imported_attachment_ids ) ) {
-			return [];
+	public function update_featured_images( $imported_post_ids, $imported_attachment_ids_map, $log_file_path, $dry_run = false ) {
+		if ( empty( $imported_post_ids ) || empty( $imported_attachment_ids_map ) ) {
+			return;
 		}
 
-		$newly_imported_post_ids = array_values( $imported_post_ids_map );
+		/**
+		 * This command will only update '_thumbnail_id's for Posts which were imported by the Content Diff (not any other Posts).
+		 *
+		 * Explanation why:
+		 * for example, we could have imported two different attachments:
+		 *      {"post_type":"attachment","id_old":1111,"id_new":999}
+		 *      {"post_type":"attachment","id_old":1223,"id_new":1111}
+		 * and let's say these two posts exist on Staging:
+		 *      - first with '_thumbnail_id' 1111
+		 *          --> this one needs to be updated from 1111 to 999
+		 *      - second with '_thumbnail_id' 1111, but let's say this post was created directly on Staging and it used the second attachment with Staging ID 1111
+		 *          --> this one's _thumbnail_id should be updated from 1111 to 999
+		 *
+		 * Therefore this command will only update '_thumbnail_id's for those Posts that were imported by the Content Diff.
+		 */
 
-		$postmeta_table = $this->wpdb->postmeta;
-		$placeholders   = implode( ',', array_fill( 0, count( $old_attachment_ids ), '%d' ) );
-		$sql            = "SELECT * FROM $postmeta_table pm WHERE meta_key = '_thumbnail_id' AND meta_value IN ( $placeholders );";
-		// phpcs:ignore -- wpdb::prepare is used by wrapper.
-		$results        = $this->wpdb->get_results( $this->wpdb->prepare( $sql, $old_attachment_ids ), ARRAY_A );
+		// Loop through posts and update their _thumbnail_id if needed.
+		foreach ( $imported_post_ids as $new_post_id ) {
 
-		foreach ( $results as $key_result => $result ) {
-			// Output a '.' every 2000 objects to prevent process getting killed.
-			if ( 0 == $key_result % 2000 ) {
-				echo '.';
-			}
+			// Get Post's current _thumbnail_id.
+			// phpcs:disable
+			$current_thumbnail_id = $this->wpdb->get_var(
+				$this->wpdb->prepare(
+					"SELECT meta_value
+					FROM {$this->wpdb->postmeta}
+					WHERE meta_key = '_thumbnail_id'
+					AND post_id = %d",
+					$new_post_id
+				)
+			);
+			// phpcs:enable
 
-			// Check if this is a newly imported Post, and only continue updating attachment ID if it is.
-			$post_id = $result['post_id'] ?? null;
-			if ( false === in_array( $post_id, $newly_imported_post_ids ) ) {
+			// Check if this _thumbnail_id is used as a key in $imported_attachment_ids_map (keys are "old_id"s, values are "new_id"s).
+			if ( ! $current_thumbnail_id || ! array_key_exists( $current_thumbnail_id, $imported_attachment_ids_map ) ) {
 				continue;
 			}
 
-			$old_id = $result['meta_value'] ?? null;
-			$new_id = $imported_attachment_ids[ $result['meta_value'] ] ?? null;
-			if ( ! is_null( $new_id ) ) {
-				$updated = $this->wpdb->update( $this->wpdb->postmeta, [ 'meta_value' => $new_id ], [ 'meta_id' => $result['meta_id'] ] );
-				// Log.
-				if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
-					$this->log(
-						$log_file_path,
-						json_encode(
-							[
-								'id_old' => (int) $old_id,
-								'id_new' => (int) $new_id,
-							]
-						)
-					);
+			// Get the new _thumbnail_id and update it.
+			$new_thumbnail_id = $imported_attachment_ids_map[ $current_thumbnail_id ];
+			if ( $dry_run ) {
+				$updated = 1;
+			} else {
+				$updated = $this->wpdb->update(
+					$this->wpdb->postmeta,
+					[ 'meta_value' => $new_thumbnail_id ],
+					[
+						'post_id'  => $new_post_id,
+						'meta_key' => '_thumbnail_id',
+					]
+				);
+			}
+
+			// Log.
+			if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
+				$msg = json_encode(
+					[
+						'post_id' => (int) $new_post_id,
+						'id_old'  => (int) $current_thumbnail_id,
+						'id_new'  => (int) $new_thumbnail_id,
+					]
+				);
+				if ( $dry_run ) {
+					WP_CLI::line( 'Updating _thubnail_id id_old=>id_new ' . $msg );
+				} else {
+					$this->log( $log_file_path, $msg );
 				}
 			}
 		}
@@ -1210,8 +1402,16 @@ class ContentDiffMigrator {
 			$block_innerhtml_updated    = $block['innerHTML'];
 			$block_innercontent_updated = $block['innerContent'][0];
 
+			// We've seen some wp:image blocks with no ID, skip them.
+			if ( ! isset( $block_updated['attrs']['id'] ) ) {
+				continue;
+			}
+
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <img> element from innerHTML -- there must be just one inside the image block.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
@@ -1249,6 +1449,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update ID in image element `class` attribute.
 			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
@@ -1300,7 +1503,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <audio> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'audio', $block_innerhtml_updated );
@@ -1338,6 +1544,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update the whole audio HTML element in Block HTML.
 			$block_innerhtml_updated    = str_replace( $audio_html, $audio_html_updated, $block_innerhtml_updated );
@@ -1386,7 +1595,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <video> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'video', $block_innerhtml_updated );
@@ -1424,6 +1636,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update the whole video HTML element in Block HTML.
 			$block_innerhtml_updated    = str_replace( $video_html, $video_html_updated, $block_innerhtml_updated );
@@ -1472,7 +1687,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <a> elementa from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'a', $block_innerhtml_updated );
@@ -1510,6 +1728,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update the whole a HTML element in Block HTML.
 			$block_innerhtml_updated    = str_replace( $a_html, $a_html_updated, $block_innerhtml_updated );
@@ -1558,7 +1779,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get attachment ID from block header.
-			$att_id = $block_updated['attrs']['id'];
+			$att_id = isset( $block_updated['attrs']['id'] ) ? $block_updated['attrs']['id'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <img> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
@@ -1596,6 +1820,9 @@ class ContentDiffMigrator {
 			if ( $att_id === $new_att_id ) {
 				continue;
 			}
+
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update ID in image element `class` attribute.
 			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
@@ -1647,7 +1874,10 @@ class ContentDiffMigrator {
 			$block_innercontent_updated = $block['innerContent'][0];
 
 			// Get mediaID (attachment ID) from block header.
-			$att_id = $block_updated['attrs']['mediaId'];
+			$att_id = isset( $block_updated['attrs']['mediaId'] ) ? $block_updated['attrs']['mediaId'] : null;
+			if ( ! $att_id ) {
+				return $content_updated;
+			}
 
 			// Get the first <img> element from innerHTML.
 			$matches = $this->html_element_manipulator->match_elements_with_self_closing_tags( 'img', $block_innerhtml_updated );
@@ -1686,10 +1916,8 @@ class ContentDiffMigrator {
 				continue;
 			}
 
-			// If it's the same ID, don't update anything.
-			if ( $att_id === $new_att_id ) {
-				continue;
-			}
+			// Cast to integer type for proper JSON encoding.
+			$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 			// Update ID in image element `class` attribute.
 			$img_html_updated = $this->update_image_element_class_attribute( [ $att_id => $new_att_id ], $img_html_updated );
@@ -1782,6 +2010,9 @@ class ContentDiffMigrator {
 				if ( $att_id === $new_att_id ) {
 					continue;
 				}
+
+				// Cast to integer type for proper JSON encoding.
+				$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 				// Update `data-id` attribute.
 				$img_html_updated = $this->update_image_element_attribute( 'data-id', [ $att_id => $new_att_id ], $img_html_updated );
@@ -1881,6 +2112,9 @@ class ContentDiffMigrator {
 				if ( $att_id === $new_att_id ) {
 					continue;
 				}
+
+				// Cast to integer type for proper JSON encoding.
+				$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 				// Update `data-id` attribute.
 				$img_html_updated = $this->update_image_element_attribute( 'data-id', [ $att_id => $new_att_id ], $img_html_updated );
@@ -1982,6 +2216,9 @@ class ContentDiffMigrator {
 				if ( $att_id === $new_att_id ) {
 					continue;
 				}
+
+				// Cast to integer type for proper JSON encoding.
+				$new_att_id = ( is_numeric( $new_att_id ) && (int) $new_att_id == $new_att_id ) ? (int) $new_att_id : $new_att_id;
 
 				// Update `id` attribute.
 				$img_html_updated = $this->update_image_element_attribute( 'id', [ $att_id => $new_att_id ], $img_html_updated );
@@ -2477,7 +2714,7 @@ class ContentDiffMigrator {
 			$where_sprintf = '';
 			foreach ( $where_conditions as $column => $value ) {
 				$where_sprintf .= ( ! empty( $where_sprintf ) ? ' AND' : '' )
-								  . ' ' . esc_sql( $column ) . ' = %s';
+									. ' ' . esc_sql( $column ) . ' = %s';
 			}
 			$where_sprintf = ' WHERE' . $where_sprintf;
 			$sql_sprintf   = $sql . $where_sprintf;
@@ -2511,7 +2748,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->posts, $insert_post_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting post, ID %d, post row %s', $orig_id, json_encode( $post_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error inserting post, ID %d, post row %s', $orig_id, json_encode( $post_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2534,7 +2771,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->postmeta, $insert_postmeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error in insert_postmeta_row, post_id %s, postmeta_row %s', $post_id, json_encode( $postmeta_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error in insert_postmeta_row, post_id %s, postmeta_row %s', $post_id, json_encode( $postmeta_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2550,15 +2787,30 @@ class ContentDiffMigrator {
 	 * @return int Inserted User ID.
 	 */
 	public function insert_user( $user_row ) {
+		$old_user_id = $user_row['ID'];
+
 		$insert_user_row = $user_row;
 		unset( $insert_user_row['ID'] );
 
 		$inserted = $this->wpdb->insert( $this->wpdb->users, $insert_user_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting user, ID %d, user_row %s', $user_row['ID'], json_encode( $user_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error inserting user, ID %d, user_row %s', $user_row['ID'], json_encode( $user_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
-		return $this->wpdb->insert_id;
+		// Last inserted ID.
+		$new_user_id = $this->wpdb->insert_id;
+
+		// Save original user ID as usermeta.
+		$this->wpdb->insert(
+			$this->wpdb->usermeta,
+			[
+				'user_id'    => $new_user_id,
+				'meta_key'   => self::SAVED_META_LIVE_POST_ID,
+				'meta_value' => $old_user_id,
+			]
+		);
+
+		return $new_user_id;
 	}
 
 	/**
@@ -2578,7 +2830,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->usermeta, $insert_usermeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting user meta, user_id %d, $usermeta_row %s', $user_id, json_encode( $usermeta_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error inserting user meta, user_id %d, $usermeta_row %s', $user_id, json_encode( $usermeta_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2603,7 +2855,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->comments, $insert_comment_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting comment, $new_post_id %d, $new_user_id %d, $comment_row %s', $new_post_id, $new_user_id, json_encode( $comment_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error inserting comment, $new_post_id %d, $new_user_id %d, $comment_row %s', $new_post_id, $new_user_id, json_encode( $comment_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2626,7 +2878,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->commentmeta, $insert_commentmeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting comment meta, $new_comment_id %d, $commentmeta_row %s', $new_comment_id, json_encode( $commentmeta_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error inserting comment meta, $new_comment_id %d, $commentmeta_row %s', $new_comment_id, json_encode( $commentmeta_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2645,7 +2897,7 @@ class ContentDiffMigrator {
 	public function update_comment_parent( $comment_id, $comment_parent_new ) {
 		$updated = $this->wpdb->update( $this->wpdb->comments, [ 'comment_parent' => $comment_parent_new ], [ 'comment_ID' => $comment_id ] );
 		if ( 1 != $updated ) {
-			throw new \RuntimeException( sprintf( 'Error updating comment parent, $comment_id %d, $comment_parent_new %d', $comment_id, $comment_parent_new ) );
+			throw new \RuntimeException( sprintf( 'Error updating comment parent, $comment_id %d, $comment_parent_new %d', $comment_id, $comment_parent_new ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $updated;
@@ -2717,7 +2969,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->termmeta, $insert_termmeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting term meta, $term_id %d, $termmeta_row %s', $term_id, json_encode( $termmeta_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error inserting term meta, $term_id %d, $termmeta_row %s', $term_id, json_encode( $termmeta_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2742,7 +2994,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->term_taxonomy, $insert_term_taxonomy_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting term_taxonomy, $new_term_id %d, term_taxonomy_id %s', $new_term_id, json_encode( $term_taxonomy_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error inserting term_taxonomy, $new_term_id %d, term_taxonomy_id %s', $new_term_id, json_encode( $term_taxonomy_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2767,7 +3019,7 @@ class ContentDiffMigrator {
 			]
 		);
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting term relationship, $object_id %d, $term_taxonomy_id %d', $object_id, $term_taxonomy_id ) );
+			throw new \RuntimeException( sprintf( 'Error inserting term relationship, $object_id %d, $term_taxonomy_id %d', $object_id, $term_taxonomy_id ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2786,7 +3038,7 @@ class ContentDiffMigrator {
 	public function update_post_author( $post_id, $new_author_id ) {
 		$updated = $this->wpdb->update( $this->wpdb->posts, [ 'post_author' => $new_author_id ], [ 'ID' => $post_id ] );
 		if ( 1 != $updated ) {
-			throw new \RuntimeException( sprintf( 'Error updating post author, $post_id %d, $new_author_id %d', $post_id, $new_author_id ) );
+			throw new \RuntimeException( sprintf( 'Error updating post author, $post_id %d, $new_author_id %d', $post_id, $new_author_id ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $updated;
@@ -2811,11 +3063,11 @@ class ContentDiffMigrator {
 	 * Checks whether all core WP DB tables are present in used DB.
 	 *
 	 * @param string $table_prefix Table prefix.
-	 * @param string $skip_tables  Core WP DB tables to skip (without prefix).
+	 * @param array  $skip_tables  Core WP DB tables to skip (without prefix).
 	 *
 	 * @throws \RuntimeException In case not all live DB core WP tables are found.
 	 */
-	public function validate_core_wp_db_tables( $table_prefix, $skip_tables = [] ) {
+	public function validate_core_wp_db_tables_exist_in_db( $table_prefix, $skip_tables = [] ) {
 		$all_tables = $this->get_all_db_tables();
 		foreach ( self::CORE_WP_TABLES as $table ) {
 			if ( in_array( $table, $skip_tables ) ) {
@@ -2823,7 +3075,7 @@ class ContentDiffMigrator {
 			}
 			$tablename = $table_prefix . $table;
 			if ( ! in_array( $tablename, $all_tables ) ) {
-				throw new \RuntimeException( sprintf( 'Core WP DB table %s not found.', $tablename ) );
+				throw new \RuntimeException( sprintf( 'Core WP DB table %s not found.', $tablename ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 			}
 		}
 	}
@@ -2892,9 +3144,13 @@ class ContentDiffMigrator {
 	 * @return array
 	 */
 	public function filter_for_different_collated_tables( string $table_prefix, array $skip_tables = [] ): array {
-		return array_filter(
-			$this->get_collation_comparison_of_live_and_core_wp_tables( $table_prefix, $skip_tables ),
-			fn( $validated_table ) => false === $validated_table['match_bool']
+		$collation_comparison = $this->get_collation_comparison_of_live_and_core_wp_tables( $table_prefix, $skip_tables );
+
+		return array_values(
+			array_filter(
+				$collation_comparison,
+				fn( $validated_table ) => false === $validated_table['match_bool']
+			)
 		);
 	}
 
@@ -2934,7 +3190,7 @@ class ContentDiffMigrator {
 		$rename_result             = $this->wpdb->query( $rename_sql );
 
 		if ( is_wp_error( $rename_result ) ) {
-			throw new \RuntimeException( "Unable to rename table: '$rename_sql'\n" . $rename_result->get_error_message() );
+			throw new \RuntimeException( "Unable to rename table: '$rename_sql'\n" . $rename_result->get_error_message() ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		$create_like_table_sql = "CREATE TABLE {$source_table} LIKE $match_collation_for_table";
@@ -2942,7 +3198,7 @@ class ContentDiffMigrator {
 		$create_result         = $this->wpdb->query( $create_like_table_sql );
 
 		if ( is_wp_error( $create_result ) ) {
-			throw new \RuntimeException( "Unable to create table: '$create_like_table_sql'\n" . $create_result->get_error_message() );
+			throw new \RuntimeException( "Unable to create table: '$create_like_table_sql'\n" . $create_result->get_error_message() ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		$limiter = [
@@ -2953,17 +3209,16 @@ class ContentDiffMigrator {
 		$table_columns_sql = "SHOW COLUMNS FROM $source_table";
 		// phpcs:ignore -- query fully sanitized.
 		$table_columns_results = $this->wpdb->get_results( $table_columns_sql );
-		$table_columns         = implode( ',', array_map( fn( $column_row) => "`$column_row->Field`", $table_columns_results ) );
+		$table_columns         = implode( ',', array_map( fn( $column_row ) => "`$column_row->Field`", $table_columns_results ) );
 		// phpcs:ignore -- query fully sanitized.
 		$count                 = $this->wpdb->get_row( "SELECT COUNT(*) as counter FROM $backup_table;" );
 
 		if ( 0 === $count ) {
-			throw new \RuntimeException( "Table '$backup_table' has 0 rows. No need to continue." );
+			throw new \RuntimeException( "Table '$backup_table' has 0 rows. No need to continue." ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		$iterations = ceil( $count->counter / $limiter['limit'] );
 		for ( $i = 1; $i <= $iterations; $i++ ) {
-			WP_CLI::log( "Iteration $i out of $iterations" );
 			$insert_sql = "INSERT INTO `{$source_table}`({$table_columns}) SELECT {$table_columns} FROM {$backup_table} LIMIT {$limiter['start']}, {$limiter['limit']}";
 			// phpcs:ignore -- query fully sanitized.
 			$insert_result = $this->wpdb->query( $insert_sql );
@@ -2971,7 +3226,8 @@ class ContentDiffMigrator {
 			if ( ! is_wp_error( $insert_result ) && ( false !== $insert_result ) && ( 0 !== $insert_result ) ) {
 				$limiter['start'] = $limiter['start'] + $limiter['limit'];
 			} else {
-				throw new \RuntimeException( sprintf( "Got up to (not including) %s. Failed running SQL '%s'.", $limiter['start'], $insert_sql ) );
+				$db_error = ( '' != $this->wpdb->last_error ) ? 'DB error message: ' . $this->wpdb->last_error : 'No DB error message available -- check error and debug logs.';
+				WP_CLI::error( sprintf( "Got up to (not including) %s. Failed running SQL '%s'. %s", $limiter['start'], $insert_sql, $db_error ) );
 			}
 
 			if ( $sleep_in_seconds ) {

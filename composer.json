@@ -8,7 +8,7 @@
   },
   "repositories": [
     {
-      "url": "https://github.com/Automattic/newspack-cms-importers.git",
+      "url": "https://github.com/Automattic/newspack-scraper-migrator.git",
       "type": "git"
     },
     {
@@ -18,19 +18,27 @@
     {
       "url": "https://github.com/Automattic/newspack-content-converter.git",
       "type": "git"
+    },
+    {
+        "type": "git",
+        "url": "https://github.com/Automattic/newspack-migration-tools.git"
     }
   ],
   "require": {
     "paquettg/php-html-parser": "^3.1",
     "symfony/dom-crawler": "^5.2",
     "symfony/css-selector": "^5.2",
-    "automattic/newspack-cms-importers": "dev-master",
     "automattic/newspack-post-image-downloader": "dev-master",
-    "automattic/newspack-content-converter": "dev-master"
+    "automattic/newspack-content-converter": "dev-master",
+    "halaxa/json-machine": "^1.1",
+    "mustache/mustache": "^2.14",
+    "simplehtmldom/simplehtmldom": "2.0-RC2",
+    "automattic/newspack-scraper-migrator": "dev-trunk",
+    "automattic/newspack-migration-tools": "dev-trunk"
   },
   "require-dev": {
-    "automattic/vipwpcs": "^2.0",
-    "wp-coding-standards/wpcs": "^2.1",
+    "automattic/vipwpcs": "^3.0",
+    "wp-coding-standards/wpcs": "^3.0",
     "phpcompatibility/phpcompatibility-wp": "^2.1",
     "composer/installers": "^1.7",
     "dealerdirect/phpcodesniffer-composer-installer": "^0.7.0",
@@ -68,9 +76,17 @@
     ]
   },
   "scripts": {
+    "phpcs": "./vendor/bin/phpcs",
+    "phpcbf": "./vendor/bin/phpcbf",
     "release": [
       "composer install --no-dev --optimize-autoloader",
       "composer archive --format=zip --dir=release --file=newspack-custom-content-migrator"
+    ],
+    "update-with-nmt-symlinked": [
+      "rm -rf  vendor/automattic/newspack-migration-tools",
+      "composer install",
+      "rm -rf vendor/automattic/newspack-migration-tools",
+      "ln -s ../../dev/newspack-migration-tools vendor/automattic/newspack-migration-tools"
     ]
   }
 }

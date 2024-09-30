@@ -2,10 +2,13 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \WP_CLI;
 
-class SubtitleMigrator implements InterfaceCommand {
+class SubtitleMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * Meta field subtitle is stored in.
@@ -15,37 +18,12 @@ class SubtitleMigrator implements InterfaceCommand {
 	const NEWSPACK_SUBTITLE_META_FIELD = 'newspack_post_subtitle';
 
 	/**
-	 * @var null|InterfaceCommand Instance.
+	 * {@inheritDoc}
 	 */
-	private static $instance = null;
-
-	/**
-	 * Constructor.
-	 */
-	private function __construct() {
-	}
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator migrate-excerpt-to-subtitle',
-			[ $this, 'cmd_migrate_excerpt_to_subtitle' ],
+			self::get_command_closure( 'cmd_migrate_excerpt_to_subtitle' ),
 			[
 				'shortdesc' => 'Convert all post excerpts into post subtitles.',
 				'synopsis'  => [

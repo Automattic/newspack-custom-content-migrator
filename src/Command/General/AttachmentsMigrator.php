@@ -7,14 +7,21 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
+use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Utils\BatchLogic;
+use \NewspackCustomContentMigrator\Utils\Logger;
+use simplehtmldom\HtmlDocument;
 use \WP_CLI;
 
 /**
  * Attachments general Migrator command class.
  */
-class AttachmentsMigrator implements InterfaceCommand {
+class AttachmentsMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 	// Logs.
 	const S3_ATTACHMENTS_URLS_LOG = 'S3_AHTTACHMENTS_URLS.log';
 	const DELETING_MEDIA_LOGS     = 'DELETING_MEDIA_LOGS.log';
@@ -29,47 +36,40 @@ class AttachmentsMigrator implements InterfaceCommand {
 	private $attachment_logic;
 
 	/**
+	 * Logger.
+	 *
+	 * @var Logger $logger Logger instance.
+	 */
+	private $logger;
+
+	/**
+	 * @var GutenbergBlockGenerator
+	 */
+	private GutenbergBlockGenerator $block_generator;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
 		$this->attachment_logic = new AttachmentsLogic();
+		$this->logger           = new Logger();
+		$this->block_generator = new GutenbergBlockGenerator();
 	}
 
 	/**
-	 * Singleton instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
+	 * {@inheritDoc}
 	 */
-	private static $instance = null;
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-get-ids-by-years',
-			[ $this, 'cmd_get_atts_by_years' ],
+			self::get_command_closure( 'cmd_get_atts_by_years' ),
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-switch-local-images-urls-to-s3-urls',
-			[ $this, 'cmd_switch_local_images_urls_to_s3_urls' ],
+			self::get_command_closure( 'cmd_switch_local_images_urls_to_s3_urls' ),
 			[
-				'shortdesc' => 'Switch images URLs from local URLs to S3 bucket based URLs.',
+				'shortdesc' => 'In all post_content it updates images URLs from local URLs to S3 bucket based URLs.',
 				'synopsis'  => [
 					[
 						'type'        => 'flag',
@@ -91,9 +91,12 @@ class AttachmentsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-delete-posts-attachments',
-			[ $this, 'cmd_attachment_delete_posts_attachments' ],
+			self::get_command_closure( 'cmd_attachment_delete_posts_attachments' ),
 			[
-				'shortdesc' => 'Delete all posts\' attachments.',
+				'shortdesc' => "This command deletes only posts' attachments (just those attachments which belong to posts), and it works in two steps. "
+					. 'First we should run this command without the --confirm-deletion flag, and it will move the attachment files to a temporary folder. This is to double check and make sure we are not about to delete attachments that are still in use, and lets us QA the results first. '
+					. 'Secondly, after we do a manual QA, we run this command a second time with the --confirm-deletion flag, at which point it will actually delete the attachments. '
+					. 'In case we wanted to restore the attachments after the QA, we can use the --restore-attachments  flag.',
 				'synopsis'  => [
 					[
 						'type'        => 'flag',
@@ -136,7 +139,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-check-broken-images',
-			[ $this, 'cmd_check_broken_images' ],
+			self::get_command_closure( 'cmd_check_broken_images' ),
 			[
 				'shortdesc' => 'Check images with broken URLs in-story.',
 				'synopsis'  => [
@@ -174,9 +177,127 @@ class AttachmentsMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator attachments-regenerate-media-thumbnails',
+			self::get_command_closure( 'cmd_regenerate_media_thumbnails' ),
+			[
+				'shortdesc' => 'Regenerate media thumbnails in batches.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts per batch, if we\'re planning to run this in batches.',
+						'optional'    => true,
+						'default'     => -1,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch number, if we\'re planning to run this in batches.',
+						'optional'    => true,
+						'default'     => 1,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator attachments-get-hosts-from-post-content',
+			self::get_command_closure( 'cmd_get_hosts_post_content' ),
+			[
+				'shortdesc' => 'Check images with broken URLs in-story.',
+				'synopsis'  => [],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator attachments-repair-img-blocks-w-no-id',
+			self::get_command_closure( 'cmd_repair_img_blocks_w_no_id' ),
+			[
+				'shortdesc' => 'Repair image blocks with local images that have no ID and therefore are harder to edit for the user.',
+				'synopsis'  => [
+					BatchLogic::$num_items,
+				],
+			],
+		);
 	}
 
-	/**
+	public function cmd_repair_img_blocks_w_no_id( array $pos_args, array $assoc_args ): void {
+		$logfile = __FUNCTION__ . '.log';
+
+		global $wpdb;
+		$posts = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT ID, post_content FROM wp_posts WHERE post_content LIKE %s AND post_status = 'publish' AND post_type = 'post' ORDER BY ID LIMIT %d",
+				'%' . $wpdb->esc_like( '<!-- wp:image' ) . '%',
+				$assoc_args[ BatchLogic::$num_items['name'] ] ?? PHP_INT_MAX
+			)
+		);
+
+		$total = count( $posts );
+		$this->logger->log( $logfile, sprintf( 'Found %d posts with image blocks', $total ), Logger::INFO );
+		$counter = 0;
+		foreach ( $posts as $post ) {
+			WP_CLI::log( sprintf( 'Processing post ID %d (%d/%d) ', $post->ID, ++$counter, $total ) );
+			$blocks = parse_blocks( $post->post_content );
+			// Target only image blocks with no id and a local image. "Local" is a bit un-scientific here,
+			// but it's fast.
+			$target_blocks = array_filter( $blocks, function ( $block ) {
+				return 'core/image' === $block['blockName'] && empty( $block['attrs']['id'] ) && str_contains( $block['innerHTML'], '/wp-content/uploads/' );
+			} );
+			if ( empty( $target_blocks ) ) {
+				continue;
+			}
+
+			foreach ( $target_blocks as $idx => $block ) {
+				$doc = new HtmlDocument( $block['innerHTML'] );
+				$img = $doc->find( 'img' );
+				if ( empty( $img[0] ) ) {
+					continue; // Not much we can do.
+				}
+				$src           = $img[0]->getAttribute( 'src' );
+				$relative_url  = strstr( wp_parse_url( $src, PHP_URL_PATH ), '/wp-content' );
+				$url           = get_site_url() . $relative_url;
+				$attachment_id = attachment_url_to_postid( $url );
+				if ( ! $attachment_id ) {
+					// If the attachment doesn't exist, import it.
+					$attachment_id = $this->attachment_logic->import_attachment_for_post( $post->ID, $src );
+
+					if ( is_wp_error( $attachment_id ) ) {
+						$this->logger->log( $logfile, sprintf( 'Failed to import attachment for post %d: %s', $post->ID, $attachment_id->get_error_message() ), Logger::ERROR );
+						continue;
+					}
+				}
+
+				$attachment_post = get_post( $attachment_id );
+				if ( ! empty( $doc->find( 'figcaption' )[0] ) ) {
+					// Temporarily set excerpt on the attachment post so the blocks generator
+					// is tricked into using that as caption.
+					$attachment_post->post_excerpt = $doc->find( 'figcaption' )[0]->innertext();
+				}
+				$repaired_block = $this->block_generator->get_image(
+					$attachment_post,
+					'full',
+					false,
+					'',
+					$block['attrs']['align'] ?? 'center'
+				);
+				$blocks[ $idx ] = $repaired_block;
+			}
+
+			wp_update_post(
+				[
+					'ID'           => $post->ID,
+					'post_content' => serialize_blocks( $blocks ),
+				]
+			);
+			$this->logger->log( $logfile, sprintf( 'Updated post %s', get_permalink( $post->ID ) ), Logger::SUCCESS );
+		}
+	}
+
+		/**
 	 * Gets a list of attachment IDs by years for those attachments which have files on local in (/wp-content/uploads).
 	 *
 	 * @param array $pos_args   Positional arguments.
@@ -185,48 +306,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 	 * @return void
 	 */
 	public function cmd_get_atts_by_years( $pos_args, $assoc_args ) {
-		global $wpdb;
-		$ids_years  = [];
-		$ids_failed = [];
-
-		// phpcs:ignore
-		$att_ids = $wpdb->get_results( "select ID from {$wpdb->posts} where post_type = 'attachment' ; ", ARRAY_A );
-		foreach ( $att_ids as $key_att_id => $att_id_row ) {
-			$att_id = $att_id_row['ID'];
-			WP_CLI::log( sprintf( '(%d)/(%d) %d', $key_att_id + 1, count( $att_ids ), $att_id ) );
-
-			// Check if this attachment is in local wp-content/uploads.
-			$url                        = wp_get_attachment_url( $att_id );
-			$url_pathinfo               = pathinfo( $url );
-			$dirname                    = $url_pathinfo['dirname'];
-			$pathmarket                 = '/wp-content/uploads/';
-			$pos_pathmarker             = strpos( $dirname, $pathmarket );
-			$dirname_remainder          = substr( $dirname, $pos_pathmarker + strlen( $pathmarket ) );
-			$dirname_remainder_exploded = explode( '/', $dirname_remainder );
-
-			// Group by years folders.
-			$year = isset( $dirname_remainder_exploded[0] ) && is_numeric( $dirname_remainder_exploded[0] ) && ( 4 === strlen( $dirname_remainder_exploded[0] ) ) ? (int) $dirname_remainder_exploded[0] : null;
-			if ( is_null( $year ) ) {
-				$ids_failed[ $att_id ] = $url;
-			} else {
-				$ids_years[ $year ][] = $att_id;
-			}
-		}
-
-		// Save {$year}.txt file.
-		foreach ( array_keys( $ids_years ) as $year ) {
-			$att_ids = $ids_years[ $year ];
-			$file    = $year . '.txt';
-			file_put_contents( $file, implode( ' ', $att_ids ) . ' ' );
-		}
-
-		// Save 0_failed_ids.txt file for files which may not be on local.
-		foreach ( $ids_failed as $att_id => $url ) {
-			$file = '0_failed_ids.txt';
-			file_put_contents( $file, $att_id . ' ' . $url . "\n", FILE_APPEND );
-		}
-
-		WP_CLI::log( sprintf( "> created {year}.txt's and %s", $file ) );
+		\Newspack\MigrationTools\Command\AttachmentsMigrator::get_instance()->cmd_get_atts_by_years( $pos_args, $assoc_args );
 	}
 
 	/**
@@ -511,6 +591,130 @@ class AttachmentsMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for `newspack-content-migrator attachments-check-broken-images`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_check_broken_images( $args, $assoc_args ) {
+		$is_using_s3     = isset( $assoc_args['is-using-s3'] ) ? true : false;
+		$posts_per_batch = $assoc_args['posts_per_batch'] ?? null;
+		$batch           = $assoc_args['batch'] ?? null;
+		$index           = $assoc_args['index'] ?? null;
+		$log_file_prefix = $assoc_args['log-file-prefix'] ?? 'broken_media_urls_batch';
+
+		$this->attachment_logic->get_broken_attachment_urls_from_posts(
+			[],
+			$is_using_s3,
+			$posts_per_batch,
+			$batch,
+			$index,
+			function( $post_id, $broken_url ) use ( $batch, $log_file_prefix ) {
+				$this->log( sprintf( '%s_%s.log', $log_file_prefix, $batch ), sprintf( '%d,%s', $post_id, $broken_url ) );
+			}
+		);
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator attachments-regenerate-media-thumbnails`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_regenerate_media_thumbnails( $args, $assoc_args ) {
+		$posts_per_batch = $assoc_args['posts-per-batch'] ?? -1;
+		$batch           = $assoc_args['batch'] ?? 1;
+		$log_file_prefix = 'regenerated_media_thumnails.sql';
+
+		$meta_query = [
+			[
+				'key'     => '_newspack_regenerated_thumnails',
+				'compare' => 'NOT EXISTS',
+			],
+		];
+
+		$total_query = new \WP_Query(
+			[
+				'posts_per_page' => -1,
+				'post_type'      => 'attachment',
+				// 'p'              => 1028943,
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => 'attachment',
+				// 'p'              => 1028943,
+				'fields'         => 'ids',
+				'post_status'    => 'any',
+				'paged'          => $batch,
+				'posts_per_page' => $posts_per_batch,
+				'meta_query'     => $meta_query, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+			]
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $index => $post_id ) {
+			$fullsizepath = get_attached_file( $post_id );
+
+			if ( false !== $fullsizepath && file_exists( $fullsizepath ) ) {
+				$metadata = wp_generate_attachment_metadata( $post_id, $fullsizepath );
+				wp_update_attachment_metadata( $post_id, $metadata );
+
+				$this->logger->log( $log_file_prefix, sprintf( '(%d/%d) Thumnails regenerated for media %d', $index, $posts_per_batch, $post_id ) );
+			}
+
+			update_post_meta( $post_id, '_newspack_regenerated_thumnails', true );
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator attachments-get-hosts-from-post-content`.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_get_hosts_post_content( $args, $assoc_args ) {
+		$posts_per_batch = $assoc_args['posts-per-batch'] ?? 10000;
+		$batch           = $assoc_args['batch'] ?? 1;
+		$log_file_prefix = 'broken_media_urls_batch';
+
+		$posts = get_posts(
+			[
+				'posts_per_page' => $posts_per_batch,
+				'post_type'      => 'post',
+				'post_status'    => array( 'publish' ),
+				'paged'          => $batch,
+				// 'p'              => 1088482,
+			]
+		);
+
+		$urls = [];
+		foreach ( $posts as $index => $post ) {
+			$post_content = $post->post_content;
+			// get domain from URLs in the format domain.tld/wp-content/uploads/...
+			preg_match_all( '/"(?<url>[^"]+)\/uploads\//', $post_content, $image_sources_match );
+
+			foreach ( $image_sources_match['url'] as $url ) {
+				if ( ! in_array( $url, $urls ) ) {
+					$urls[] = $url;
+				}
+			}
+		}
+
+		print_r( $urls );
+	}
+
+	/**
 	 * Get all non posts images URLs.
 	 *
 	 * @return string[]
@@ -709,32 +913,6 @@ class AttachmentsMigrator implements InterfaceCommand {
 	 */
 	private function get_uploads_dir() {
 		return wp_upload_dir()['basedir'];
-	}
-
-
-	/**
-	 * Callable for `newspack-content-migrator attachments-check-broken-images`.
-	 *
-	 * @param $args
-	 * @param $assoc_args
-	 */
-	public function cmd_check_broken_images( $args, $assoc_args ) {
-		$is_using_s3     = isset( $assoc_args['is-using-s3'] ) ? true : false;
-		$posts_per_batch = $assoc_args['posts_per_batch'] ?? null;
-		$batch           = $assoc_args['batch'] ?? null;
-		$index           = $assoc_args['index'] ?? null;
-		$log_file_prefix = $assoc_args['log-file-prefix'] ?? 'broken_media_urls_batch';
-
-		$this->attachment_logic->get_broken_attachment_urls_from_posts(
-			[],
-			$is_using_s3,
-			$posts_per_batch,
-			$batch,
-			$index,
-			function( $post_id, $broken_url ) use ( $batch, $log_file_prefix ) {
-				$this->log( sprintf( '%s_%s.log', $log_file_prefix, $batch ), sprintf( '%d,%s', $post_id, $broken_url ) );
-			}
-		);
 	}
 
 	/**

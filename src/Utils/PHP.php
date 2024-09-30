@@ -17,8 +17,19 @@ class PHP {
 	 */
 	public static function readline( $question, $assoc_args = [] ) {
 		fwrite( STDOUT, $question );
-		$answer = strtolower( trim( fgets( STDIN ) ) );
+		$answer = rtrim( fgets( STDIN ), "\t\n\r\0\x0B" );
 
 		return $answer;
+	}
+
+	/**
+	 * Outputs a string directly to STDOUT. This lets you keep outputting to the same line. To break lines, add explicit "\n" to $str.
+	 *
+	 * @param string $str String to output.
+	 *
+	 * @return void
+	 */
+	public static function echo_stdout( string $str ) {
+		fwrite( STDOUT, $str );
 	}
 }
