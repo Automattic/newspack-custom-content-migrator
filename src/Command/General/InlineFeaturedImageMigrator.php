@@ -2,25 +2,20 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
-use \NewspackCustomContentMigrator\Logic\Posts as PostLogic;
-use \NewspackCustomContentMigrator\Utils\Logger;
-use \WP_CLI;
-use \WP_Query;
-use Symfony\Component\DomCrawler\Crawler as Crawler;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
+use NewspackCustomContentMigrator\Logic\Posts as PostLogic;
+use NewspackCustomContentMigrator\Utils\Logger;
+use WP_CLI;
+use Symfony\Component\DomCrawler\Crawler;
 
 /**
  * InlineFeaturedImageMigrator.
  */
-class InlineFeaturedImageMigrator implements InterfaceCommand {
+class InlineFeaturedImageMigrator implements RegisterCommandInterface {
 
-	/**
-	 * Instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
+	use WpCliCommandTrait;
 
 	/**
 	 * PostLogic Instance.
@@ -35,36 +30,38 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 	 * @var Logger $logger Logger instance.
 	 */
 	private $logger;
+	
+	/**
+	 * Crawler.
+	 *
+	 * @var Crawler $crawler Crawler instance.
+	 */
+	private $crawler;
+
+	/**
+	 * AttachmentsLogic Instance.
+	 *
+	 * @var $attachments AttachmentsLogic.
+	 */
+	private $attachments;
 
 	/**
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->post_logic = new PostLogic();
-		$this->logger     = new Logger();
+		$this->post_logic  = new PostLogic();
+		$this->logger      = new Logger();
+		$this->crawler     = new Crawler();
+		$this->attachments = new AttachmentsLogic();
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator remove-featured-images-from-beginning-of-postcontent',
-			[ $this, 'cmd_remove_featured_images_from_beginning_of_postcontent' ],
+			self::get_command_closure( 'cmd_remove_featured_images_from_beginning_of_postcontent' ),
 			[
 				'shortdesc' => 'Goes through all the Posts, and removes all occurrences of featured image from beginning of Post content.',
 				'synopsis'  => [
@@ -80,14 +77,30 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator set-first-image-from-content-as-featured-image',
-			[ $this, 'cmd_set_first_image_from_content_as_featured_image' ],
+			self::get_command_closure( 'cmd_set_first_image_from_content_as_featured_image' ),
 			[
 				'shortdesc' => "Runs through all the Posts, and in case it doesn't have a featured image, finds the first <img> element in Post content and sets it as featured image.",
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-ids-csv',
+						'description' => 'Optional. If provided, will only run on given post IDs.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 're-set-even-existing-featured-images',
+						'description' => 'Optional. If provided, will re-set featured images on all posts, not just on those that do not already have a featured image.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
 			]
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator hide-featured-image-if-used-in-post-content',
-			[ $this, 'cmd_hide_featured_image_if_used_in_post_content' ],
+			self::get_command_closure( 'cmd_hide_featured_image_if_used_in_post_content' ),
 			[
 				'shortdesc' => 'Hides featured image for post if that same image is used in post_content. By default it hides the featured image only if that same image is used at the very beginning of post_content. Optionally, if --anywhere-in-post-content flag is used, it hides the featured image if that same image is used anywhere in post_content.',
 				'synopsis'  => [
@@ -127,6 +140,14 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 						'repeating'   => false,
 					],
 				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator hide-all-featured-images',
+			self::get_command_closure( 'cmd_hide_all_featured_images' ),
+			[
+				'shortdesc' => 'Hide ALL featured image.',
 			]
 		);
 	}
@@ -179,12 +200,12 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 		}
 		// Use all posts if no post IDs specified.
 		if ( ! $post_ids ) {
-			WP_CLI::line( "Fetching all published post IDs..." );
+			WP_CLI::line( 'Fetching all published post IDs...' );
 			$post_ids = $this->post_logic->get_all_posts_ids( 'post', [ 'publish' ] );
 		}
 
 		// Timestamp log.
-		$this->logger->log( $log, sprintf( 'Starting %s', date('Y-m-d H:I:s') ) );
+		$this->logger->log( $log, sprintf( 'Starting %s', date( 'Y-m-d H:I:s' ) ) );
 
 		// Go through IDs.
 		foreach ( $post_ids as $key_post_id => $post_id ) {
@@ -229,7 +250,17 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 				$featured_image_used_in_post_content = false !== strpos( $post_content, $featured_image_no_host );
 				if ( ! $featured_image_used_in_post_content ) {
 					WP_CLI::line( sprintf( 'Featured image not used inline.', $post_id ) );
-					continue;
+				}
+
+				// Check if Featured Image is used anywhere in post_content blocks.
+				$image_blocks = $this->get_image_blocks_from_post_content_blocks( parse_blocks( $post_content ) );
+				foreach ( $image_blocks as $image_block ) {
+					if ( $image_block['attrs']['id'] == $thumbnail_id ) {
+						$this->logger->log( $log, sprintf( 'Post ID %d — Featured image used in image block.', $post_id ), $this->logger::SUCCESS );
+						$featured_image_used_in_post_content = true;
+
+						break;
+					}
 				}
 
 				// Hide featured image.
@@ -239,8 +270,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 					}
 					$this->logger->log( $log, sprintf( 'Post ID %d -- featured image hidden, image used somewhere in post_content', $post_id ), $this->logger::SUCCESS );
 					continue;
-				}
-
+				}           
 			} else {
 
 				// Hide featured image only if post_content starts with that same image.
@@ -322,8 +352,7 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 					}
 					$this->logger->log( $log, sprintf( 'Post ID %d -- featured image hidden, post_content starts with same image', $post_id ), $this->logger::SUCCESS );
 					continue;
-				}
-
+				}           
 			}
 		}
 
@@ -340,74 +369,119 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_set_first_image_from_content_as_featured_image( $args, $assoc_args ) {
-		$time_start = microtime( true );
+		global $wpdb;
+		
+		$post_ids                        = isset( $assoc_args['post-ids-csv'] ) ? explode( ',', $assoc_args['post-ids-csv'] ) : null;
+		$re_set_existing_featured_images = isset( $assoc_args['re-set-even-existing-featured-images'] ) ? true : false;
 
-		$posts_wo_featured_img_query = new WP_Query(
-			[
-				'meta_query'     => [
-					[
-						'key'     => '_thumbnail_id',
-						'value'   => '?',
-						'compare' => 'NOT EXISTS',
-					],
-				],
-				'posts_per_page' => -1,
-			]
-		);
-		$posts_wo_featured_img       = $posts_wo_featured_img_query->get_posts();
-		if ( empty( $posts_wo_featured_img ) ) {
+		// Get all or some posts.
+		if ( ! $post_ids ) {
+			$post_ids = $this->post_logic->get_all_posts_ids( 'post', [ 'publish', 'future', 'draft', 'pending', 'private' ] );
+		}
+		if ( empty( $post_ids ) ) {
 			WP_CLI::line( 'No posts without featured image found.' );
 			exit;
 		}
 
-		$crawler          = new Crawler();
-		$attachment_logic = new AttachmentsLogic();
-		foreach ( $posts_wo_featured_img as $k => $post ) {
-			WP_CLI::line( sprintf( '👉 (%d/%d) ID %d ...', $k + 1, count( $posts_wo_featured_img ), $post->ID ) );
+		foreach ( $post_ids as $k => $post_id ) {
+			WP_CLI::line( sprintf( '(%d/%d) post ID %d ...', $k + 1, count( $post_ids ), $post_id ) );
+			
+			$current_thumbnail_id = get_post_thumbnail_id( $post_id );
+			
+			// Skip posts which already have a featured image.
+			if ( false == $re_set_existing_featured_images ) {
+				if ( $current_thumbnail_id ) {
+					WP_CLI::line( '× skipping, post already has a featured image.' );
+					continue;
+				}   
+			}
+
+			// Get content for crawling.
+			$post_content = $wpdb->get_var( $wpdb->prepare( "SELECT post_content FROM $wpdb->posts WHERE ID = %d", $post_id ) );
+
+			$image_blocks                       = $this->get_image_blocks_from_post_content_blocks( parse_blocks( $post_content ) );
+			$has_set_featured_image_from_blocks = false;
+
+			if ( ! empty( $image_blocks ) ) {
+				WP_CLI::line( '✓ found Gutenberg image blocks.' );
+
+				// Loop through each image block and try to set a thumbnail from the image ID.
+				// Stop when this is successfull.
+				foreach ( $image_blocks as $image_block ) {
+					if ( set_post_thumbnail( $post_id, $image_block['attrs']['id'] ) ) {
+						$has_set_featured_image_from_blocks = true;
+						break;
+					} else {
+						WP_CLI::line( sprintf( '❌ Could not set Featured Image from Block. ID %d', $image_block['attrs']['id'] ) );
+					}
+				}
+			}
+
+			// Check if Featured Image was set from Gutenberg Blocks. If so, continue with the next post
+			if ( $has_set_featured_image_from_blocks ) {
+				WP_CLI::line( sprintf( '✓ Updated Featured Image from core/image Gutenberg block. Attachment ID %d', $image_block['attrs']['id'] ) );
+				continue;
+			}
+
+			// Reaching here means that either of the following is true:
+			// 1. There aren't image blocks.
+			// 2. There are image blocks, however, we couldn't use them to set the Thumbnail because
+			// the referenced image in the image block is not actually an uploaded Attachment.
 
 			// Find the first <img>.
-			$crawler->clear();
-			$crawler->add( $post->post_content );
-			$img_data  = $crawler->filterXpath( '//img' )->extract( [ 'src', 'title', 'alt' ] );
+			$this->crawler->clear();
+			$this->crawler->add( $post_content );
+			$img_data  = $this->crawler->filterXpath( '//img' )->extract( [ 'src', 'title', 'alt' ] );
 			$img_src   = $img_data[0][0] ?? null;
 			$img_title = $img_data[0][1] ?? null;
 			$img_alt   = $img_data[0][2] ?? null;
 			if ( ! $img_src ) {
-				WP_CLI::line( '× no images found in Post.' );
+				WP_CLI::line( '× skipping, no images found in Post.' );
 				continue;
 			}
 
 			// Check if there's already an attachment with this image.
 			$is_src_fully_qualified = ( 0 == strpos( $img_src, 'http' ) );
 			if ( ! $is_src_fully_qualified ) {
-				WP_CLI::line( sprintf( '× skipping, img src `%s` not fully qualified URL', $img_src ) );
+				WP_CLI::line( sprintf( '× skipping, img src `%s` not fully qualified URL in post ID %s', $img_src, $post_id ) );
 				continue;
 			}
 
+			// When using WP.com CDN, the URL can look like this:
+			// https://i0.wp.com/lafocus-newspack.newspackstaging.com/wp-content/uploads/2022/08/1_original_file_I0.jpg?resize=804%2C1024&ssl=1
+			//
+			// The ?resize=804%2C1024&ssl=1 part breaks the logic to download file and set proper extension and file data.
+			//
+			// The code below strips the CDN hostname and query parameters and leaves the local hostname without query params which can be fetched both
+			// from the current site or an external file.
+			if ( preg_match( '~^https?:\/\/i\d+\.wp\.com\/~', $img_src ) ) {
+				$img_src = preg_replace( '~i\d+\.wp\.com\/~', '', $img_src );
+				$img_src = preg_replace( '~\\?.*~', '', $img_src );
+			}
+
 			// Import attachment if it doesn't exist.
-			$att_id     = attachment_url_to_postid( $img_src );
-			$attachment = get_post( $att_id );
-			if ( $attachment ) {
-				WP_CLI::line( sprintf( '✓ found img %s as att. ID %d', $img_src, $att_id ) );
-			} else {
-				WP_CLI::line( sprintf( '- importing img `%s`...', $img_src ) );
-				$att_id = $attachment_logic->import_external_file( $img_src, $img_title, $img_alt, $description = null, $img_alt, $post->ID );
-				if ( is_wp_error( $att_id ) ) {
-					WP_CLI::warning( sprintf( '❗ error importing img `%s` : %s', $img_src, $att_id->get_error_message() ) );
-					continue;
-				}
+			WP_CLI::line( sprintf( '- importing img `%s`...', $img_src ) );
+			$att_id = $this->attachments->import_external_file( $img_src, $img_title, $img_alt, $description = null, $img_alt, $post_id );
+			if ( is_wp_error( $att_id ) ) {
+				WP_CLI::warning( sprintf( '❗ ERROR importing img `%s` to post ID %s : %s', $img_src, $post_id, $att_id->get_error_message() ) );
+				continue;
 			}
 
 			// Set attachment as featured image.
-			$result_featured_set = set_post_thumbnail( $post, $att_id );
-			if ( ! $result_featured_set ) {
-				WP_CLI::warning( sprintf( '❗ could not set att.ID %s as featured image', $att_id ) );
+			if ( $current_thumbnail_id == $att_id ) {
+				WP_CLI::line( sprintf( '× skipping, att.ID %s is already correct on post ID %s', $att_id, $post_id ) );
+				continue;
 			} else {
-				WP_CLI::line( sprintf( '👍 set att.ID %s as featured image', $att_id ) );
-			}
+				$result_featured_set = set_post_thumbnail( $post_id, $att_id );
+				if ( ! $result_featured_set ) {
+					WP_CLI::warning( sprintf( '❗ ERROR could not set att.ID %s as featured image to post ID %s', $att_id, $post_id ) );
+				} else {
+					WP_CLI::line( sprintf( '👍 SUCCESS att.ID %s set as featured image to post ID %s', $att_id, $post_id ) );
+				}
+			}       
 		}
 
-		WP_CLI::line( sprintf( 'All done! 🙌 Took %d mins.', floor( ( microtime( true ) - $time_start ) / 60 ) ) );
+		WP_CLI::line( 'All done! 🙌' );
 	}
 
 	/**
@@ -507,5 +581,71 @@ class InlineFeaturedImageMigrator implements InterfaceCommand {
 		}
 
 		WP_CLI::line( sprintf( 'Finished. See %s/ folder for logs.', $log_dir ) );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator hide-all-featured-images`.
+	 *
+	 * @param array $positional_args Positional arguments.
+	 * @param array $assoc_args      Associative arguments.
+	 * @return void
+	 */
+	public function cmd_hide_all_featured_images( $positional_args, $assoc_args ) {
+		
+		$log_file = 'hide_all_featured_images.log';
+
+		$this->logger->log( $log_file, 'Starting hide ALL featured images.' );
+
+		// Posts with a featured image.
+		$query_args = [
+			'post_type'   => 'post',
+			'post_status' => 'any',
+			'fields'      => 'ids',
+			'meta_query'  => [
+				[
+					'key'     => '_thumbnail_id',
+					'value'   => '',
+					'compare' => '!=',
+				],
+			],
+		];
+
+		$counter = 0;
+
+		$this->post_logic->throttled_posts_loop(
+			$query_args, 
+			function ( $post_id ) use( $log_file, &$counter ) {
+
+				update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+
+				$this->logger->log( $log_file, sprintf( 'Featured image hidden for the post %d', $post_id ) );
+
+				$counter++;
+			}
+		);
+
+		$this->logger->log( $log_file, 'Updated count: ' . $counter );
+		
+		wp_cache_flush();
+
+		$this->logger->log( $log_file, 'Done', $this->logger::SUCCESS );
+	}
+
+	/**
+	 * Returns an array of all "core/image" blocks from the given
+	 * array of post content blocks.
+	 */
+	private function get_image_blocks_from_post_content_blocks( array $post_content_blocks ): array {
+		$image_blocks = [];
+
+		foreach ( $post_content_blocks as $block ) {
+			if ( $block['blockName'] === 'core/image' && ! empty( $block['attrs']['id'] ) ) {
+				$image_blocks[] = $block;
+			} elseif ( ! empty( $block['innerBlocks'] ) ) {
+				$image_blocks = array_merge( $image_blocks, $this->get_image_blocks_from_post_content_blocks( $block['innerBlocks'] ) );
+			}
+		}
+
+		return $image_blocks;
 	}
 }

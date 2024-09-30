@@ -2,7 +2,8 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
 use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
 use \NewspackPostImageDownloader\Downloader;
@@ -11,7 +12,9 @@ use \WP_CLI;
 /**
  * Custom migration scripts for Photo Album Pro Gallery Plugins.
  */
-class PhotoAlbumProGalleryMigrator implements InterfaceCommand {
+class PhotoAlbumProGalleryMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 	const ALBUM_MIGRATION_LOG = 'ALBUM_MIGRATION.log';
 
 	/**
@@ -39,31 +42,12 @@ class PhotoAlbumProGalleryMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * @var null|InterfaceCommand Instance.
+	 * {@inheritDoc}
 	 */
-	private static $instance = null;
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator photo-album-pro-gallery-migration',
-			array( $this, 'photo_album_pro_gallery_migration' ),
+			self::get_command_closure( 'photo_album_pro_gallery_migration' ),
 			array(
 				'shortdesc' => 'Migrate photo albums from the Photo Album Pro plugin to Jetpack slideshow Block.',
 				'synopsis'  => array(),
@@ -88,7 +72,7 @@ class PhotoAlbumProGalleryMigrator implements InterfaceCommand {
 
 		if ( ! $valid_tables ) {
 			$this->log( self::ALBUM_MIGRATION_LOG, 'WPPA tables are missing' );
-			die();
+			wp_die();
 		}
 
 		$this->log( self::ALBUM_MIGRATION_LOG, 'Starting the migration ...' );

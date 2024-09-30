@@ -15,7 +15,7 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
-use \NewspackCustomContentMigrator\Utils\Logger;
+use NewspackCustomContentMigrator\Utils\Logger;
 use WP_Post;
 
 /**
@@ -71,7 +71,7 @@ class GutenbergBlockGenerator {
 			' ',
 			array_filter(
 				array_map(
-					function( $index, $attachment_id ) use ( &$tile_sizes, &$non_existing_attachment_indexes, $tile_sizes_list ) {
+					function ( $index, $attachment_id ) use ( &$tile_sizes, &$non_existing_attachment_indexes, $tile_sizes_list ) {
 						$attachment_url = wp_get_attachment_url( $attachment_id );
 
 						if ( ! $attachment_url ) {
@@ -248,13 +248,14 @@ class GutenbergBlockGenerator {
 	 *
 	 * @param \WP_Post $attachment_post        Image Post.
 	 * @param string   $size                   Image size, full by default.
-	 * @param bool     $link_to_attachment_url Whether to link to the attachment URL or not.
-	 * @param string   $classname              Media HTML class.
-	 * @param string   $align                  Image alignment (left, right).
+	 * @param ?bool    $link_to_attachment_url Whether to link to the attachment URL or not. Defaults to true.
+	 * @param ?string  $classname              Media HTML class.
+	 * @param ?string  $align                  Image alignment (left, right).
+	 * @param ?string  $custom_link            If provided, will set custom link. Overrides $link_to_attachment_url.
 	 *
 	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
 	 */
-	public function get_image( $attachment_post, $size = 'full', $link_to_attachment_url = true, $classname = null, $align = null ) {
+	public function get_image( $attachment_post, $size = 'full', $link_to_attachment_url = true, $classname = null, $align = null, $custom_link = null ) {
 		// Validate size.
 		if ( ! in_array( $size, [ 'thumbnail', 'medium', 'large', 'full' ] ) ) {
 			$size = 'full';
@@ -262,7 +263,7 @@ class GutenbergBlockGenerator {
 
 		$caption_tag   = ! empty( $attachment_post->post_excerpt ) ? '<figcaption class="wp-element-caption">' . $attachment_post->post_excerpt . '</figcaption>' : '';
 		$image_alt     = get_post_meta( $attachment_post->ID, '_wp_attachment_image_alt', true );
-		$image_url     = wp_get_attachment_image_src( $attachment_post->ID, $size )[0];
+		$image_url     = Attachments::get_attachment_image_src( $attachment_post->ID, $size )[0];
 		$attachment_id = intval( $attachment_post->ID );
 
 		$attrs = [
@@ -273,8 +274,14 @@ class GutenbergBlockGenerator {
 		// Add <a> link to attachment URL.
 		$a_opening_tag = '';
 		$a_closing_tag = '';
-		if ( $link_to_attachment_url ) {
-			$a_opening_tag = sprintf( '<a href="%s">', $image_url );
+		if ( $custom_link || $link_to_attachment_url ) {
+			if ( $custom_link ) {
+				$link = $custom_link;
+			} elseif ( $link_to_attachment_url ) {
+				$link = $image_url;
+			}
+
+			$a_opening_tag = sprintf( '<a href="%s">', $link );
 			$a_closing_tag = '</a>';
 		}
 
@@ -336,10 +343,11 @@ VIDEO;
 		$title          = empty( $title ) ? $attachment_post->post_title : $title;
 
 		$attrs = [
-			'id'             => $attachment_post->ID,
-			'href'           => $attachment_url,
-			'displayPreview' => true,
-			'previewHeight'  => $height,
+			'id'                 => $attachment_post->ID,
+			'href'               => $attachment_url,
+			'displayPreview'     => true,
+			'previewHeight'      => $height,
+			'showDownloadButton' => $show_download_button,
 		];
 
 		$download_button = $show_download_button ? '<a href="' . $attachment_url . '" class="wp-block-file__button wp-element-button" download aria-describedby="wp-block-file--media-' . $uuid . '">Download</a>' : '';
@@ -765,6 +773,9 @@ VIDEO;
 	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
 	 */
 	private function youtube_block_from_src( $youtube_video_url ) {
+		// Clean the URL from query params as they break the block.
+		$youtube_video_url = strtok( $youtube_video_url, '?' );
+
 		$inner_html = '<figure class="wp-block-embed is-type-video is-provider-youtube wp-block-embed-youtube wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">
 		' . $youtube_video_url . '
 		</div></figure>';
@@ -795,15 +806,23 @@ VIDEO;
 		return $this->get_core_embed( $src, $caption );
 	}
 
-	/**
-	 * Generate a Vimeo block -- uses core/embed.
-	 *
-	 * @param string $src     Vimeo src.
-	 * @param string $caption Optional.
-	 *
-	 * @return array to be used in the serialize_blocks function to get the raw content of a Gutenberg Block.
-	 */
-	public function get_twitter( $src, $caption = '' ) {
+	public function get_twitter( string $src, string $caption = '' ): array {
+		$class_names   = implode(
+			' ',
+			[
+				'wp-block-embed',
+				'is-type-rich',
+				'is-provider-twitter',
+				'wp-block-embed-twitter',
+				'nccm-twitter-embed',
+			]
+		);
+		$block_content = <<<HTML
+<figure class="$class_names"><div class="wp-block-embed__wrapper">
+$src
+</div></figure>
+HTML;
+
 		return [
 			'blockName'    => 'core/embed',
 			'attrs'        => [
@@ -811,12 +830,11 @@ VIDEO;
 				'type'             => 'rich',
 				'providerNameSlug' => 'twitter',
 				'responsive'       => true,
+				'className'        => $class_names,
 			],
 			'innerBlocks'  => [],
-			'innerHTML'    => ' <figure class="wp-block-embed is-type-rich is-provider-twitter wp-block-embed-twitter"><div class="wp-block-embed__wrapper"> ' . $src . ' </div></figure> ',
-			'innerContent' => [
-				0 => ' <figure class="wp-block-embed is-type-rich is-provider-twitter wp-block-embed-twitter"><div class="wp-block-embed__wrapper"> ' . $src . ' </div></figure> ',
-			],
+			'innerHTML'    => $block_content,
+			'innerContent' => [ $block_content ],
 		];
 	}
 
@@ -1035,5 +1053,4 @@ VIDEO;
 			'innerContent' => [],
 		];
 	}
-
 }

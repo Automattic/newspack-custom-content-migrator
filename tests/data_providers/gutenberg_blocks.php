@@ -21,15 +21,11 @@ HTML;
 
 	/**
 	 * @param int    $id  Image attachment ID.
-	 * @param string $src Optional.
+	 * @param string $src Image source.
 	 *
 	 * @return string
 	 */
-	public function get_gutenberg_image_block( $id, $src = null ) {
-		if ( is_null( $src ) ) {
-			$src = "https://newspack-host.s3.amazonaws.com/wp-content/uploads/2022/09/AP22244107023566-2-1200x800.jpg";
-		}
-
+	public function get_gutenberg_image_block( $id, $src ) {
 		$block_placeholder = <<<HTML
 <!-- wp:image {"id":%d,"sizeSlug":"large","linkDestination":"none"} -->
 <figure class="wp-block-image size-large"><img src="%s" alt="" class="wp-image-%d"/><figcaption>Caption text</figcaption></figure>
@@ -147,8 +143,8 @@ HTML;
 		$blocks_images = '';
 		foreach ( $img_ids as $key => $img_id ) {
 			$img_data_link = $img_data_links[ $key ];
-			$img_data_url = $img_data_urls[ $key ];
-			$img_src = $img_srcs[ $key ];
+			$img_data_url  = $img_data_urls[ $key ];
+			$img_src       = $img_srcs[ $key ];
 			// sprintf() doesn't work here, reports unknown format specifiers, for Block's usage of "%".
 			$blocks_images .= <<<HTML
 <div class="tiled-gallery__col" style="flex-basis:40.03600%"><figure class="tiled-gallery__item"><img    bbbbbbb=""   alt="" data-height="600" data-id="$img_id" data-link="$img_data_link" data-url="$img_data_url" data-width="600" src="$img_src" data-amp-layout="responsive"/></figure></div>
@@ -177,14 +173,14 @@ HTML;
 <div class="wp-block-jetpack-slideshow aligncenter" data-effect="slide"><div class="wp-block-jetpack-slideshow_container swiper-container"><ul class="wp-block-jetpack-slideshow_swiper-wrapper swiper-wrapper">%s</ul><a class="wp-block-jetpack-slideshow_button-prev swiper-button-prev swiper-button-white" role="button"></a><a class="wp-block-jetpack-slideshow_button-next swiper-button-next swiper-button-white" role="button"></a><a aria-label="Pause Slideshow" class="wp-block-jetpack-slideshow_button-pause" role="button"></a><div class="wp-block-jetpack-slideshow_pagination swiper-pagination swiper-pagination-white"></div></div></div>
 <!-- /wp:jetpack/slideshow -->
 HTML;
-		$block_image = <<<HTML
+		$block_image                     = <<<HTML
 <li class="wp-block-jetpack-slideshow_slide swiper-slide"><figure><img alt="" class="wp-block-jetpack-slideshow_image wp-image-%d" data-id="%d" src="%s"/><figcaption class="wp-block-jetpack-slideshow_caption gallery-caption">%s</figcaption></figure></li>
 HTML;
 
 
 		$block_images = '';
 		foreach ( $img_ids as $key => $img_id ) {
-			$img_src = $img_srcs[ $key ];
+			$img_src          = $img_srcs[ $key ];
 			$img_caption_text = $img_caption_texts[ $key ];
 
 			$block_images .= sprintf( $block_image, $img_id, $img_id, $img_src, $img_caption_text );
@@ -203,7 +199,7 @@ HTML;
 	 *
 	 * @return string
 	 */
-	public function get_gutenberg_jetpackimagecompare_block( $id1, $url1, $id2, $url2 ) : string {
+	public function get_gutenberg_jetpackimagecompare_block( $id1, $url1, $id2, $url2 ): string {
 
 		$block_placeholder_sprintf = <<<HTML
 <!-- wp:jetpack/image-compare {"imageBefore":{"id":%d,"url":"%s","alt":"","width":2560,"height":1707},"imageAfter":{"id":%d,"url":"%s","alt":"","width":2560,"height":1707}} -->
@@ -261,14 +257,14 @@ HTML;
 <figure class="wp-block-gallery has-nested-images columns-default is-cropped">%s</figure>
 <!-- /wp:gallery -->
 HTML;
-		$image_block_placeholder_sprintf = <<<HTML
+		$image_block_placeholder_sprintf         = <<<HTML
 <!-- wp:image {"id":%d,"sizeSlug":"large","linkDestination":"none"} -->
 <figure class="wp-block-image size-large"><img src="%s" alt="" class="wp-image-%d"/></figure>
 <!-- /wp:image -->
 HTML;
-		$img_blocks = [];
+		$img_blocks                              = [];
 		foreach ( $img_ids as $key => $img_id ) {
-			$img_src = $img_srcs[ $key ];
+			$img_src      = $img_srcs[ $key ];
 			$img_blocks[] = sprintf( $image_block_placeholder_sprintf, $img_id, $img_src, $img_id );
 		}
 
@@ -306,7 +302,7 @@ HTML;
 	 * @return string HTML.
 	 */
 	public function get_jetpack_tiled_gallery_block( $id1, $id2, $id3 ) {
-		$html_placeholders =  <<<HTML
+		$html_placeholders = <<<HTML
 <!-- wp:jetpack/tiled-gallery {"columnWidths":[["71.51704","28.48296"],["37.62035","62.37965"],["33.33333","33.33333","33.33333"],["32.02508","35.94242","32.03250"],["62.48203","37.51797"],["69.17398","30.82602"],["69.16156","30.83844"],["34.68121","32.84397","32.47482"],["69.53806","30.46194"],["45.84734","54.15266"]],"ids":[%d,%d,%d]} -->
 <div class="wp-block-jetpack-tiled-gallery aligncenter is-style-rectangular"><div class="tiled-gallery__gallery"><div class="tiled-gallery__row"><div class="tiled-gallery__col" style="flex-basis:71.51704"><figure class="tiled-gallery__item"><img alt="PHS girls basketball team" data-height="1707" data-id="%d" data-link="https://philomathnews-oldlive.newspackstaging.com/021522_gbb_bench_0044/" data-url="https://philomathnews-oldlive.newspackstaging.com/wp-content/uploads/2022/02/021522_gbb_bench_0044-1200x800.jpg" data-width="2560" src="https://i0.wp.com/philomathnews.com/wp-content/uploads/2022/02/021522_gbb_bench_0044-1200x800.jpg?ssl=1" data-amp-layout="responsive"/></figure></div><div class="tiled-gallery__col" style="flex-basis:28.48296"><figure class="tiled-gallery__item"><img alt="Ingrid Hellesto" data-height="1707" data-id="%d" data-link="https://philomathnews-oldlive.newspackstaging.com/021522_gbb_hellesto_0019/" data-url="https://philomathnews-oldlive.newspackstaging.com/wp-content/uploads/2022/02/021522_gbb_hellesto_0019-1200x800.jpg" data-width="2560" src="https://i1.wp.com/philomathnews.com/wp-content/uploads/2022/02/021522_gbb_hellesto_0019-1200x800.jpg?ssl=1" data-amp-layout="responsive"/></figure><figure class="tiled-gallery__item"><img alt="PHS girls basketball team" data-height="1798" data-id="%d" data-link="https://philomathnews-oldlive.newspackstaging.com/021522_gbb_team_0013/" data-url="https://philomathnews-oldlive.newspackstaging.com/wp-content/uploads/2022/02/021522_gbb_team_0013-1200x843.jpg" data-width="2560" src="https://i0.wp.com/philomathnews.com/wp-content/uploads/2022/02/021522_gbb_team_0013-1200x843.jpg?ssl=1" data-amp-layout="responsive"/></figure></div></div><div class="tiled-gallery__row"><div class="tiled-gallery__col" style="flex-basis:37.62035"></div></div></div></div>
 <!-- /wp:jetpack/tiled-gallery -->
@@ -314,5 +310,4 @@ HTML;
 
 		return sprintf( $html_placeholders, $id1, $id2, $id3, $id1, $id2, $id3 );
 	}
-
 }

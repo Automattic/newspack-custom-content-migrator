@@ -2,12 +2,11 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \CoAuthors_Guest_Authors;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \NewspackCustomContentMigrator\Logic\Posts;
 use \NewspackCustomContentMigrator\PluginSetup;
-use \NewspackCustomContentMigrator\Utils\PHP;
 use \WP_CLI;
 use \WP_Query;
 use WP_User_Query;
@@ -15,26 +14,21 @@ use WP_User_Query;
 /**
  * Class for migrating Co-Authors Plus Guest Authors.
  */
-class CoAuthorPlusMigrator implements InterfaceCommand {
+class CoAuthorPlusMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * Prefix of tags which get converted to Guest Authors.
 	 *
 	 * @var string Prefix of a tag which contains a Guest Author's name.
 	 */
-	private $tag_author_prefix = 'author:';
-
-	/**
-	 * Instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
+	const TAG_AUTHOR_PREFIX = 'author:';
 
 	/**
 	 * Co-Authors Plus.
 	 *
-	 * @var CoAuthorPlus $coauthorsplus_logic Co-Authors Plus logic.
+	 * @var CoAuthorsPlusHelper $coauthorsplus_logic Co-Authors Plus logic.
 	 */
 	private $coauthorsplus_logic;
 
@@ -49,34 +43,19 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->coauthorsplus_logic = new CoAuthorPlus();
+		$this->coauthorsplus_logic = new CoAuthorsPlusHelper();
 		$this->posts_logic         = new Posts();
 	}
 
 	/**
-	 * Sets up Co-Authors Plus plugin dependencies.
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-tags-with-prefix-to-guest-authors',
-			array( $this, 'cmd_tags_with_prefix_to_guest_authors' ),
+			self::get_command_closure( 'cmd_tags_with_prefix_to_guest_authors' ),
 			[
-				'shortdesc' => sprintf( 'Converts tags with a specific prefix to Guest Authors, in the following way -- runs through all public Posts, and converts tags beginning with %s prefix (this prefix is currently hardcoded) to Co-Authors Plus Guest Authors, and also assigns them to the post as (co-)authors. It completely overwrites the existing list of authors for these Posts.', $this->tag_author_prefix ),
+				'shortdesc' => sprintf( 'Converts tags with a specific prefix to Guest Authors, in the following way -- runs through all public Posts, and converts tags beginning with %s prefix (this prefix is currently hardcoded) to Co-Authors Plus Guest Authors, and also assigns them to the post as (co-)authors. It completely overwrites the existing list of authors for these Posts.', self::TAG_AUTHOR_PREFIX ),
 				'synopsis'  => array(
 					array(
 						'type'        => 'assoc',
@@ -90,7 +69,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-tags-with-taxonomy-to-guest-authors',
-			array( $this, 'cmd_tags_with_taxonomy_to_guest_authors' ),
+			self::get_command_closure( 'cmd_tags_with_taxonomy_to_guest_authors' ),
 			[
 				'shortdesc' => "Converts tags with specified taxonomy to Guest Authors, in the following way -- runs through all the public Posts, gets tags which have a specified taxonomy assigned to them (this taxonomy given here as a positional argument, e.g. 'writer'), and converts these tags to Co-Authors Plus Guest Authors, and also assigns them to the posts as co-authors. It completely overwrites the existing list of authors for these Posts.",
 				'synopsis'  => array(
@@ -106,7 +85,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-cpt-to-guest-authors',
-			array( $this, 'cmd_cpt_to_guest_authors' ),
+			self::get_command_closure( 'cmd_cpt_to_guest_authors' ),
 			[
 				'shortdesc' => "Converts a CPT used for describing authors to a CAP Guest Authors. The associative arguments tell the command where to find info needed to create the Guest Author objects. For example, the GA's 'display name' could be located in the CPT's 'post_title', the GA's 'description' (bio) could be in the CPT's 'post_content', and the email address in a CPT's meta field called 'author_email' -- and these could all be provided like this: `--display_name=post_title --description=post_content --email=meta:author_email`.",
 				'synopsis'  => [
@@ -171,7 +150,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-link-guest-author-to-existing-user',
-			array( $this, 'cmd_link_ga_to_user' ),
+			self::get_command_closure( 'cmd_link_ga_to_user' ),
 			[
 				'shortdesc' => 'Links a Guest Author to an existing WP User.',
 				'synopsis'  => [
@@ -194,7 +173,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-create-guest-author-and-add-to-post',
-			array( $this, 'cmd_cap_create_guest_author_and_add_to_post' ),
+			self::get_command_closure( 'cmd_cap_create_guest_author_and_add_to_post' ),
 			[
 				'shortdesc' => 'Create a Co-Authors Plus Guest Author and add it to a post.',
 				'synopsis'  => [
@@ -245,14 +224,14 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-fix-non-unique-guest-slugs',
-			array( $this, 'cmd_cap_fix_non_unique_guest_slugs' ),
+			self::get_command_closure( 'cmd_cap_fix_non_unique_guest_slugs' ),
 			[
 				'shortdesc' => "Make unique any Guest Author Slug which matches a User's slug.",
 			]
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-split-to-multiple-coauthors',
-			[ $this, 'cmd_split_guest_author_to_multiple_authors' ],
+			self::get_command_closure( 'cmd_split_guest_author_to_multiple_authors' ),
 			[
 				'shortdesc' => 'Reassigns all posts currently associated to a specific Guest Author to different multiple (or single) Guest Author(s). Example use: `wp newspack-content-migrator co-authors-split-to-multiple-coauthors "Chris Christofersson of NewsSource, with Adam Black of 100 Days in Appalachia" --new-guest-author-names="Chris Christofersson; Adam Black of 100 Days in Appalachia" --delimiter="; "',
 				'synopsis'  => [
@@ -283,7 +262,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-fix-gas-post-counts',
-			[ $this, 'cmd_fix_gas_post_counts' ],
+			self::get_command_closure( 'cmd_fix_gas_post_counts' ),
 			[
 				'shortdesc' => 'Fixes/updates CAP post counts. However, the GA list in Dashboard only shows counts for Posts. A GA could own Pages too, and counts for pages will not be displayed there. This script is technically correct, it will update the counts to the correct number, but CAP Dashboard will still show counts just for Posts.',
 			]
@@ -291,7 +270,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-delete-all-co-authors',
-			[ $this, 'cmd_delete_all_co_authors' ],
+			self::get_command_closure( 'cmd_delete_all_co_authors' ),
 			[
 				'shortdesc' => 'Delete all Guest Authors on the site.',
 				'synopsis'  => [
@@ -308,7 +287,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-delete-authors-with-zero-posts',
-			[ $this, 'cmd_delete_authors_with_zero_posts' ],
+			self::get_command_closure( 'cmd_delete_authors_with_zero_posts' ),
 			[
 				'shortdesc' => 'Delete all Guest Authors having 0 posts.',
 				'synopsis'  => [
@@ -323,8 +302,24 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 			],
 		);
 		WP_CLI::add_command(
+			'newspack-content-migrator co-authors-meta-to-guest-authors',
+			self::get_command_closure( 'cmd_meta_to_guest_authors' ),
+			[
+				'shortdesc' => "Converts meta value with specified key to Guest Authors, in the following way -- Checks each post with that meta key and determines whether the meta value is different than the current author. If so, it creates or finds the guest author and assigns it to the post. It completely overwrites the existing list of authors for these Posts.",
+				'synopsis'  => array(
+					array(
+						'type'        => 'assoc',
+						'name'        => 'meta_key',
+						'description' => 'The meta key to use for guest author assignment.',
+						'optional'    => false,
+						'repeating'   => false,
+					),
+				),
+			]
+		);
+    WP_CLI::add_command(
 			'newspack-content-migrator co-authors-export-posts-and-gas',
-			[ $this, 'cmd_export_posts_gas' ],
+			self::get_command_closure( 'cmd_export_posts_gas' ),
 			[
 				'shortdesc' => 'Export all posts and their associated Guest Authors to a .php file. The command exports just the GAs names associated to post IDs, not WP Users -- if a post has a WP User author but no GAs, that ID will have a null value.',
 				'synopsis'  => [
@@ -340,7 +335,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-set-ga-as-author-of-all-posts-in-category',
-			[ $this, 'cmd_set_ga_as_author_of_all_posts_in_category' ],
+			self::get_command_closure( 'cmd_set_ga_as_author_of_all_posts_in_category' ),
 			[
 				'shortdesc' => 'Sets a GA as author for all posts in category. Does not append GA, sets as only author.',
 				'synopsis'  => [
@@ -363,7 +358,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator co-authors-convert-wpuser-to-guestauthor',
-			[ $this, 'cmd_convert_wpuser_to_ga' ],
+			self::get_command_closure( 'cmd_convert_wpuser_to_ga' ),
 			[
 				'shortdesc' => "Converts a WP_User to GA. If --ga-id is provided, the command will transfer WP_User's posts to that GA, otherwise it will create a new GA.",
 				'synopsis'  => [
@@ -613,7 +608,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Installs the CAP plugin, and reinitializes the \NewspackCustomContentMigrator\Logic\CoAuthorPlus dependency.
+	 * Installs the CAP plugin, and reinitializes the Newspack\MigrationTools\Logic\CoAuthorsPlusHelper dependency.
 	 */
 	public function require_cap_plugin() {
 		if ( false === $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
@@ -623,7 +618,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 			PluginSetup::setup_coauthors_plus();
 
 			// reinitialize the CAP dependency.
-			$this->coauthorsplus_logic = new CoAuthorPlus();
+			$this->coauthorsplus_logic = new CoAuthorsPlusHelper();
 		}
 	}
 
@@ -713,7 +708,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		$the_query   = new WP_Query( $args );
 		$total_posts = $the_query->found_posts;
 
-		WP_CLI::line( sprintf( "Converting tags beginning with '%s' to Guest Authors for %d total Posts...", $this->tag_author_prefix, $total_posts ) );
+		WP_CLI::line( sprintf( "Converting tags beginning with '%s' to Guest Authors for %d total Posts...", self::TAG_AUTHOR_PREFIX, $total_posts ) );
 
 		$progress_bar = \WP_CLI\Utils\make_progress_bar( 'Converting', $total_posts );
 		if ( $the_query->have_posts() ) {
@@ -757,7 +752,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		$post_ids    = $this->posts_logic->get_posts_with_tag_with_taxonomy( $tag_taxonomy );
 		$total_posts = count( $post_ids );
 
-		WP_CLI::line( sprintf( 'Converting author tags beginning with %s and with taxonomy %s to Guest Authors for %d posts.', $this->tag_author_prefix, $tag_taxonomy, $total_posts ) );
+		WP_CLI::line( sprintf( 'Converting author tags beginning with %s and with taxonomy %s to Guest Authors for %d posts.', self::TAG_AUTHOR_PREFIX, $tag_taxonomy, $total_posts ) );
 
 		$progress_bar = \WP_CLI\Utils\make_progress_bar( 'Converting', $total_posts );
 		foreach ( $post_ids as $post_id ) {
@@ -895,7 +890,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		$ga_id   = isset( $assoc_args['ga_id'] ) ? (int) $assoc_args['ga_id'] : null;
 		$user_id = isset( $assoc_args['user_id'] ) ? (int) $assoc_args['user_id'] : null;
 
-		$guest_author = $this->coauthorsplus_logic->get_guest_author_by( 'ID', $ga_id );
+		$guest_author = $this->coauthorsplus_logic->get_guest_author_by_id( $ga_id );
 		$user         = get_user_by( 'id', $user_id );
 		if ( ! $guest_author ) {
 			WP_CLI::error( sprintf( 'Guest Author by ID %d not found.', $ga_id ) );
@@ -988,7 +983,7 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		return $errors;
 	}
 
-	public function cmd_cap_fix_non_unique_guest_slugs() {
+	public function cmd_cap_fix_non_unique_guest_slugs( array $pos_args, array $assoc_args ): void {
 
 		$authors = ( new WP_User_Query(
 			array(
@@ -1247,6 +1242,128 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Callable for the 'co-authors-meta-to-guest-authors' command.
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 */
+	public function cmd_meta_to_guest_authors( $args, $assoc_args ) {
+		$this->require_cap_plugin();
+
+		$meta_key = $assoc_args['meta_key'];
+		
+		$posts = get_posts( [
+			'posts_per_page' => -1,
+			'meta_key'       => $meta_key,
+			'meta_value'     => '',
+			'meta_compare'   => '!='
+		] );
+
+		if ( empty( $posts ) ) {
+			WP_CLI::error( sprintf( 'No posts found with meta_key "%s%', $meta_key ) );
+		}
+
+		foreach ( $posts as $post ) {
+			$coauthors      = get_coauthors( $post->ID );
+			$current_author = get_the_author_meta( 'display_name', $post->post_author );
+			$byline_author  = get_post_meta( $post->ID, $meta_key, true );
+
+			if ( empty( $byline_author ) ) {
+				WP_CLI::warning( sprintf(
+					'No byline author found in meta for post: %s (%d). Skipping.',
+					$post->post_title,
+					$post->ID
+				) );
+				continue;
+			}
+
+			if ( strtolower( $current_author ) === strtolower( $byline_author ) ) {
+				WP_CLI::warning( sprintf(
+					'Author %s is already assigned to post: %s (%d)',
+					$byline_author,
+					$post->post_title,
+					$post->ID
+				) );
+				continue;
+			}
+
+			// Check if any guest authors are already the byline author.
+			$author_already_set = false;
+			foreach ( $coauthors as $coauthor ) {
+				if ( strtolower( $byline_author ) === strtolower( $coauthor->display_name ) ) {
+					WP_CLI::warning( sprintf(
+						'Author %s is already assigned to post: %s (%d)',
+						$byline_author,
+						$post->post_title,
+						$post->ID
+					) );
+					$author_already_set = true;
+					break;
+				}
+			}
+			if ( $author_already_set ) {
+				continue;
+			}
+
+			WP_CLI::warning( sprintf(
+				'Assigning %s for post %s (%d) instead of %s',
+				$byline_author,
+				$post->post_title,
+				$post->ID,
+				$current_author
+			) );
+
+			$guest_author = false;
+
+			// Get co-author author if exists.
+			$possible_guest_authors = $this->coauthorsplus_logic->coauthors_plus->search_authors( $byline_author );
+			foreach ( $possible_guest_authors as $possible_guest_author ) {
+				if ( strtolower( $possible_guest_author->display_name ) === strtolower( $byline_author ) ) {
+					WP_CLI::warning( sprintf(
+						'Found existing guest author %s',
+						$possible_guest_author->display_name
+					) );
+					$guest_author = $possible_guest_author;
+					break;
+				}
+			}
+
+			// Check by username.
+			if ( ! $guest_author ) {
+				$author_username = sanitize_title( $byline_author );
+				$potential_author = $this->coauthorsplus_logic->coauthors_guest_authors->get_guest_author_by( 'user_login', $author_username, true );
+				if ( $potential_author ) {
+					$guest_author = $potential_author;
+				}
+			}
+
+			if ( ! $guest_author ) {
+				WP_CLI::warning( 'Creating guest author: ' . $byline_author );
+				$author_data = [ 
+					'display_name' => $byline_author, 
+					'user_login'   => sanitize_title( $byline_author ) 
+				];
+				$author_id    = $this->coauthorsplus_logic->create_guest_author( $author_data );
+				if ( ! $author_id ) {
+					WP_CLI::error( sprintf(
+						'Failed to create guest author: %s',
+						$byline_author
+					) );
+				}
+				$guest_author = $this->coauthorsplus_logic->get_guest_author_by_id(  $author_id );
+			}
+
+			$this->coauthorsplus_logic->coauthors_plus->add_coauthors( $post->ID, [ $guest_author->user_nicename ] );
+			WP_CLI::warning( sprintf(
+				'Added guest author to post %d',
+				$post->ID
+			) );
+		}
+		
+		WP_CLI::success( 'Done!' );
+	}
+
+	/**
 	 * Taken from https://gist.github.com/sepehr/3371339.
 	 *
 	 * @param int $length Length of string.
@@ -1294,11 +1411,11 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Takes an array of tags, and returns those which begin with the $this->tag_author_prefix prefix, stripping the result
+	 * Takes an array of tags, and returns those which begin with the self::TAG_AUTHOR_PREFIX prefix, stripping the result
 	 * of this prefix before returning.
 	 *
 	 * Example, if this tag is present in the input $tags array:
-	 *      '{$this->tag_author_prefix}Some Name' is present in the $tagas array
+	 *      '{self::TAG_AUTHOR_PREFIX}Some Name' is present in the $tagas array
 	 * it will be detected, the prefix stripped, and the rest of the tag returned as an element of the array:
 	 *      'Some Name'.
 	 *
@@ -1315,10 +1432,10 @@ class CoAuthorPlusMigrator implements InterfaceCommand {
 		}
 
 		foreach ( $tags as $tag ) {
-			if ( substr( $tag->name, 0, strlen( $this->tag_author_prefix ) ) == $this->tag_author_prefix ) {
+			if ( substr( $tag->name, 0, strlen( self::TAG_AUTHOR_PREFIX ) ) == self::TAG_AUTHOR_PREFIX ) {
 				$author_tags[] = [
 					'tag'         => $tag,
-					'author_name' => substr( $tag->name, strlen( $this->tag_author_prefix ) ),
+					'author_name' => substr( $tag->name, strlen( self::TAG_AUTHOR_PREFIX ) ),
 				];
 			}
 		}

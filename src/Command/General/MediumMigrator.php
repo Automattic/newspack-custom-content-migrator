@@ -2,18 +2,23 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Medium;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use NewspackCustomContentMigrator\Logic\Medium;
 use NewspackCustomContentMigrator\Logic\Attachments;
+use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Utils\Logger;
 use Symfony\Component\DomCrawler\Crawler;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * Migrates Medium archive.
  */
-class MediumMigrator implements InterfaceCommand {
+class MediumMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
+
 	const ORIGINAL_ID_META_KEY = '_medium_original_id';
 
 	/**
@@ -22,13 +27,6 @@ class MediumMigrator implements InterfaceCommand {
 	 * @var string $log_file Log file name.
 	 */
 	private static $log_file = 'medium-migrator.log';
-
-	/**
-	 * Migrator instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
 
 	/**
 	 * Medium logic instance.
@@ -59,6 +57,13 @@ class MediumMigrator implements InterfaceCommand {
 	private $logger;
 
 	/**
+	 * GutenbergBlockGenerator instance.
+	 *
+	 * @var GutenbergBlockGenerator.
+	 */
+	private $block_generator;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -66,29 +71,16 @@ class MediumMigrator implements InterfaceCommand {
 		$this->attachments                = new Attachments();
 		$this->simple_local_avatars_logic = new SimpleLocalAvatars();
 		$this->logger                     = new Logger();
+		$this->block_generator            = new GutenbergBlockGenerator();
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator migrate-medium-archive',
-			array( $this, 'cmd_medium_archive' ),
+			self::get_command_closure( 'cmd_medium_archive' ),
 			[
 				'shortdesc' => 'Migrates Medium archive.',
 				'synopsis'  => [
@@ -97,6 +89,13 @@ class MediumMigrator implements InterfaceCommand {
 						'name'        => 'zip-archive',
 						'description' => 'Medium archive zip file full path (no ending slash).',
 						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'refresh-content',
+						'description' => 'If set, it will refresh the existing content, and import the new one.',
+						'optional'    => true,
 						'repeating'   => false,
 					],
 				],
@@ -116,14 +115,16 @@ class MediumMigrator implements InterfaceCommand {
 		}
 
 		$articles_csv_file_path = $assoc_args['zip-archive'];
+		$refresh_content        = isset( $assoc_args['refresh-content'] ) ? true : false;
 
-		$this->logger->log( self::$log_file, 'Migrating Medium archive...', Logger::LINE );
+		$this->logger->log( self::$log_file, sprintf( 'Migrating Medium archive: %s', $articles_csv_file_path ), Logger::LINE );
 
 		$result                = $this->medium_logic->process_file( $articles_csv_file_path );
 		$existing_original_ids = $this->get_existing_original_ids();
 
 		if ( is_wp_error( $result ) ) {
 			$this->logger->log( self::$log_file, 'Error: ' . $result->get_error_message(), Logger::LINE );
+
 			return;
 		}
 
@@ -131,12 +132,12 @@ class MediumMigrator implements InterfaceCommand {
 			$this->logger->log( self::$log_file, 'Processing article: ' . $article['title'], Logger::LINE );
 
 			// Check if post exists.
-			if ( in_array( $article['original_id'], $existing_original_ids ) ) {
+			if ( ! $refresh_content && in_array( $article['original_id'], $existing_original_ids ) ) {
 				$this->logger->log( self::$log_file, ' -- Article already exists: ' . $article['title'], Logger::LINE );
 				continue;
 			}
 
-			$this->process_post( $article );
+			$this->process_post( $article, $refresh_content );
 		}
 	}
 
@@ -175,6 +176,7 @@ class MediumMigrator implements InterfaceCommand {
 
 			if ( is_wp_error( $author_id ) ) {
 				$this->logger->log( self::$log_file, ' -- Error creating author: ' . $author_id->get_error_message(), Logger::WARNING );
+
 				return false;
 			}
 
@@ -197,51 +199,68 @@ class MediumMigrator implements InterfaceCommand {
 	 * Import images from the Post content.
 	 *
 	 * @param string $post_content Post content.
-	 * @param int    $post_id      Post ID.
+	 * @param int    $post_id Post ID.
 	 *
 	 * @return string Post content with updated image URIs.
 	 */
 	private function import_post_images( $post_content, $post_id ) {
 		// Extract attributes from all the `<img>`s.
-		$img_data = ( new Crawler( $post_content ) )->filterXpath( '//img' )->extract( array( 'src', 'title', 'alt' ) );
+		$images = ( new Crawler( $post_content ) )->filterXpath( '//img' );
 
-		if ( empty( $img_data ) ) {
+		if ( $images->count() === 0 ) {
 			return $post_content;
 		}
 
 		$post_content_updated = $post_content;
-		foreach ( $img_data as $img_datum ) {
-			$src   = trim( $img_datum[0] );
-			$title = $img_datum[1];
-			$alt   = $img_datum[2];
+		$images->each(
+			function ( $img ) use ( $post_id, &$post_content_updated ) {
+				$src     = $img->attr( 'src' );
+				$title   = $img->attr( 'title' );
+				$alt     = $img->attr( 'alt' );
+				$caption = null;
 
-			// Check if this image `src` was used multiple times in the content, and has possibly already downloaded.
-			if ( false === strpos( $post_content_updated, $src ) && false === strpos( $post_content_updated, esc_attr( $src ) ) ) {
-				WP_CLI::line( sprintf( ' ✖ skipping, already downloaded %s', $src ) );
-				continue;
+				// Find Caption, if available
+				$figure = $img->ancestors()->filter( 'figure' );
+				if ( $figure->count() > 0 ) {
+					$figcaption = $figure->filter( 'figcaption' );
+
+					if ( $figcaption->count() > 0 ) {
+						$caption = $figcaption->text();
+					}
+				}
+
+				// Check if the local image file exists, which will decide whether the image will be imported form file or downloaded.
+				$is_src_absolute = ( 0 === strpos( strtolower( $src ), 'http' ) );
+
+				if ( ! $is_src_absolute ) {
+					WP_CLI::warning( sprintf( '❗ Image src is not absolute: %s', $src ) );
+					return;
+				}
+
+				// If the `<img>` `title` and `alt` are still empty, let's use the image file name without the extension.
+				$filename_wo_extension = str_replace( '.' . pathinfo( $src, PATHINFO_EXTENSION ), '', pathinfo( $src, PATHINFO_FILENAME ) );
+				$title                 = empty( $title ) ? $filename_wo_extension : $title;
+				$alt                   = empty( $alt ) ? $filename_wo_extension : $alt;
+
+				// Download or import the image file.
+				WP_CLI::line( sprintf( '✓ importing %s ...', $src ) );
+				$attachment_id = $this->attachments->import_external_file( $src, $title, $caption, null, $alt, $post_id );
+			
+				if ( $figure->count() > 0 ) {
+					$image_block = $this->block_generator->get_image( get_post( $attachment_id ), 'full', false );
+
+					$post_content_updated = str_replace(
+						$figure->outerHtml(),
+						serialize_block( $image_block ),
+						$post_content_updated
+					);
+				} else {
+					// Replace the URI in Post content with the new one.
+					$img_uri_new          = wp_get_attachment_url( $attachment_id );
+					$post_content_updated = str_replace( array( esc_attr( $src ), $src ), $img_uri_new, $post_content_updated );
+				}
 			}
-
-			// Check if the local image file exists, which will decide whether the image will be imported form file or downloaded.
-			$is_src_absolute = ( 0 === strpos( strtolower( $src ), 'http' ) );
-
-			if ( ! $is_src_absolute ) {
-				WP_CLI::warning( sprintf( '❗ Image src is not absolute: %s', $src ) );
-				continue;
-			}
-
-			// If the `<img>` `title` and `alt` are still empty, let's use the image file name without the extension.
-			$filename_wo_extension = str_replace( '.' . pathinfo( $src, PATHINFO_EXTENSION ), '', pathinfo( $src, PATHINFO_FILENAME ) );
-			$title                 = empty( $title ) ? $filename_wo_extension : $title;
-			$alt                   = empty( $alt ) ? $filename_wo_extension : $alt;
-
-			// Download or import the image file.
-			WP_CLI::line( sprintf( '✓ downloading %s ...', $src ) );
-			$attachment_id = $this->attachments->import_external_file( $src, $title, null, null, $alt, $post_id );
-
-			// Replace the URI in Post content with the new one.
-			$img_uri_new          = wp_get_attachment_url( $attachment_id );
-			$post_content_updated = str_replace( array( esc_attr( $src ), $src ), $img_uri_new, $post_content_updated );
-		}
+		);
 
 		return $post_content_updated;
 	}
@@ -250,33 +269,47 @@ class MediumMigrator implements InterfaceCommand {
 	 * Inserts an article into the database.
 	 *
 	 * @param array $article Article data.
+	 * @param bool  $refresh_content If set, it will refresh the existing content, and import the new one.
 	 */
-	private function process_post( $article ) {
+	private function process_post( $article, $refresh_content ) {
+		$author = $this->medium_logic->get_author();
+		if ( empty( $author ) && defined( 'NCCM_MEDIUM_FALLBACK_AUTHOR_USERNAME' ) ) {
+			$author = [ 'user_login' => NCCM_MEDIUM_FALLBACK_AUTHOR_USERNAME ];
+		}
 		// Get/add author.
-		if ( empty( $this->medium_logic->get_author() ) ) {
+		if ( empty( $author ) ) {
 			$this->logger->log( self::$log_file, ' -- Error: Author not found: ' . $article['author'], Logger::WARNING );
+
 			return;
 		}
 
-		$author_id = $this->get_or_insert_author( $this->medium_logic->get_author() );
+		$author_id = $this->get_or_insert_author( $author );
 
 		if ( ! $author_id ) {
 			return;
 		}
 
-		$post_id = wp_insert_post(
-			[
-				'post_title'     => $article['title'],
-				'post_name'      => $article['original_slug'] ?? '',
-				'post_content'   => $article['content'],
-				'post_status'    => $article['status'],
-				'post_type'      => $article['post_type'],
-				'post_date_gmt'  => $article['post_date_gmt'],
-				'comment_status' => $article['comment_status'],
-				'ping_status'    => $article['ping_status'],
-				'post_author'    => $author_id,
-			]
-		);
+		$existing_post_id = $refresh_content ? $this->get_post_id_by_meta( $article['original_id'] ) : null;
+
+		$data = [
+			'post_title'     => $article['title'],
+			'post_name'      => $article['original_slug'] ?? '',
+			'post_content'   => $article['content'],
+			'post_status'    => $article['status'],
+			'post_type'      => $article['post_type'],
+			'post_date_gmt'  => $article['post_date_gmt'],
+			'comment_status' => $article['comment_status'],
+			'ping_status'    => $article['ping_status'],
+			'post_author'    => $author_id,
+		];
+		if ( $existing_post_id ) {
+			$post_id    = $existing_post_id;
+			$data['ID'] = $post_id;
+			wp_update_post( $data );
+		} else {
+			$post_id = wp_insert_post( $data );
+		}
+		$verb = $existing_post_id ? 'updated' : 'inserted';
 
 		// Import images from the Post content.
 		$post_content = $this->import_post_images( $article['content'], $post_id );
@@ -292,16 +325,24 @@ class MediumMigrator implements InterfaceCommand {
 
 		if ( is_wp_error( $post_id ) ) {
 			$this->logger->log( self::$log_file, 'Error: ' . $post_id->get_error_message(), Logger::LINE );
+
 			return;
 		}
 
-		$this->logger->log( self::$log_file, ' -- Article inserted with ID: ' . $post_id, Logger::LINE );
+		$this->logger->log( self::$log_file, ' -- Article ' . $verb . ' with ID: ' . $post_id, Logger::LINE );
 
 		// Set the featured image.
 		if ( ! empty( $article['featured_image'] ) ) {
-			$featured_image_id = $this->attachments->import_external_file( $article['featured_image']['url'], $article['title'], $article['featured_image']['caption'], null, null, $post_id );
+			$featured_image_id = $this->attachments->import_external_file(
+				$article['featured_image']['url'],
+				$article['title'],
+				$article['featured_image']['caption'],
+				null,
+				null,
+				$post_id 
+			);
 			if ( is_wp_error( $featured_image_id ) ) {
-				$this->logger->log( 'featured-images-import-fail.log', ' -- Error importing featured image: ' . $featured_image_id->get_error_message(), Logger::WARNING );
+				$this->logger->log( 'featured-images-import-fail.log', ' -- Error ' . $verb . ' featured image: ' . $featured_image_id->get_error_message(), Logger::WARNING );
 			} else {
 				set_post_thumbnail( $post_id, $featured_image_id );
 			}
@@ -329,5 +370,28 @@ class MediumMigrator implements InterfaceCommand {
 		update_post_meta( $post_id, self::ORIGINAL_ID_META_KEY, $article['original_id'] );
 		update_post_meta( $post_id, '_medium_post_url', $article['post_url'] );
 		update_post_meta( $post_id, 'newspack_post_subtitle', $article['subtitle'] );
+	}
+
+	/**
+	 * Get post ID by meta.
+	 *
+	 * @param string $original_id Article original ID.
+	 *
+	 * @return int|null
+	 */
+	private function get_post_id_by_meta( $original_id ) {
+		global $wpdb;
+
+		if ( empty( $original_id ) ) {
+			return null;
+		}
+
+		return $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %s",
+				self::ORIGINAL_ID_META_KEY,
+				$original_id
+			)
+		);
 	}
 }

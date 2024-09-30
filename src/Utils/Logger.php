@@ -7,7 +7,9 @@
 
 namespace NewspackCustomContentMigrator\Utils;
 
-use \WP_CLI;
+use Newspack\MigrationTools\Log\FileLogger;
+use Newspack\MigrationTools\Log\Log;
+use WP_CLI;
 
 /**
  * Class for handling commands' logging
@@ -16,10 +18,11 @@ class Logger {
 
 	const LE_LOG_DIRECTORY = 'newspack_le_logs';
 
-	const WARNING = 'warning';
-	const LINE    = 'line';
-	const SUCCESS = 'success';
-	const ERROR   = 'error';
+	const WARNING = Log::WARNING;
+	const LINE    = Log::LINE;
+	const SUCCESS = Log::SUCCESS;
+	const ERROR   = Log::ERROR;
+	const INFO    = Log::INFO;
 
 	/**
 	 * Determine the writeable directory used for storing logs created by migration commands.
@@ -34,44 +37,60 @@ class Logger {
 		}
 
 		return $log_dir . DIRECTORY_SEPARATOR . $filename . '.log';
-
 	}
 
 	/**
 	 * Simple file logging.
 	 *
-	 * @param string         $file File name or path.
-	 * @param string         $message Log message.
-	 * @param string|boolean $level Whether to output the message to the CLI. Default to `line` CLI level.
-	 * @param bool           $exit_on_error Whether to exit on error.
+	 * @param string $file          File name or path.
+	 * @param string $message       Log message.
+	 * @param string $level         Whether to output the message to the CLI. Default to `line` CLI level.
+	 * @param bool   $exit_on_error Whether to exit on error.
+	 *
+	 * @return void
+	 * @throws WP_CLI\ExitException
 	 */
-	public function log( $file, $message, $level = 'line', bool $exit_on_error = false ) {
-		$log_line_prefix = '';
-		if ( in_array( $level, [ self::SUCCESS, self::WARNING, self::ERROR ], true ) ) {
-			// Prepend the level to the message for easier grepping in the log file.
-			$log_line_prefix .= strtoupper( $level ) . ': ';
-		}
+	public function log( $file, $message, string $level = Log::LINE, bool $exit_on_error = false ): void {
+		$level = strtoupper( $level ); // Upper case for backwards compatibility.
+		FileLogger::log( $file, $message, $level, $exit_on_error );
+		$this->wp_cli_log( $message, $level, $exit_on_error );
+	}
 
-		file_put_contents( $file, $log_line_prefix . $message . "\n", FILE_APPEND ); //phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_read_file_put_contents
-
+	/**
+	 * Output log message to CLI with WP_CLI.
+	 *
+	 * @param string $message       Log message.
+	 * @param string $level         Log level - see constants in Log class.
+	 * @param bool   $exit_on_error Whether to exit the script on error – default is false.
+	 *
+	 * @return void
+	 * @throws WP_CLI\ExitException
+	 */
+	public function wp_cli_log( string $message, string $level = Log::LINE, bool $exit_on_error = false ): void {
 		if ( $level ) {
 			switch ( $level ) {
-				case ( self::SUCCESS ):
+				case ( Log::SUCCESS ):
 					WP_CLI::success( $message );
 					break;
-				case ( self::WARNING ):
+				case ( Log::WARNING ):
 					WP_CLI::warning( $message );
 					break;
-				case ( self::ERROR ):
+				case ( Log::ERROR ):
 					WP_CLI::error( $message, $exit_on_error );
 					break;
-				case ( self::LINE ):
+				case ( Log::INFO ):
+					$label = 'Info';
+					$color = '%B';
+					$label = \cli\Colors::colorize( "$color$label:%n", true );
+
+					WP_CLI::line( "$label $message" );
+					break;
+				case ( Log::LINE ):
 				default:
 					WP_CLI::line( $message );
 					break;
 			}
 		}
-
 	}
 
 }

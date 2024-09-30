@@ -2,24 +2,22 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use \DirectoryIterator;
 use \SimpleXMLElement;
 use \WP_CLI;
 
-class TownNewsMigrator implements InterfaceCommand {
+class TownNewsMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 	const LOG_FILE                       = 'townnews_importer.log';
 	const TOWN_NEWS_ORIGINAL_ID_META_KEY = '_newspack_import_id';
 	const DEFAULT_CO_AUTHOR_DISPLAY_NAME = 'Staff';
-
-	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
 
 	/**
 	 * @var Logger.
@@ -34,7 +32,7 @@ class TownNewsMigrator implements InterfaceCommand {
 	private $attachments;
 
 	/**
-	 * @var CoAuthorPlus $coauthorsplus_logic
+	 * @var CoAuthorsPlusHelper $coauthorsplus_logic
 	 */
 	private $coauthorsplus_logic;
 
@@ -49,33 +47,19 @@ class TownNewsMigrator implements InterfaceCommand {
 	private function __construct() {
 		$this->logger                    = new Logger();
 		$this->attachments               = new Attachments();
-		$this->coauthorsplus_logic       = new CoAuthorPlus();
+		$this->coauthorsplus_logic       = new CoAuthorsPlusHelper();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator town-news-migrate-content',
-			array( $this, 'cmd_migrate_content' ),
+			self::get_command_closure( 'cmd_migrate_content' ),
 			[
-				'shortdesc' => 'Migrate TownNews content.',
+				'shortdesc' => 'Migrate TownNews content. It is recommended to run this command by feeding it one yyyy/ folder at a time.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -97,7 +81,7 @@ class TownNewsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator town-news-migrate-featured-tag',
-			array( $this, 'cmd_migrate_featured_tag' ),
+			self::get_command_closure( 'cmd_migrate_featured_tag' ),
 			[
 				'shortdesc' => 'Migrate TownNews post featured tag.',
 				'synopsis'  => [
@@ -114,7 +98,7 @@ class TownNewsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator town-news-fix-tags',
-			array( $this, 'cmd_fix_tags' ),
+			self::get_command_closure( 'cmd_fix_tags' ),
 			[
 				'shortdesc' => 'Fix tags.',
 				'synopsis'  => [
@@ -148,6 +132,7 @@ class TownNewsMigrator implements InterfaceCommand {
 		$imported_original_ids = $this->get_imported_original_ids();
 
 		$export_dir_iterator = new DirectoryIterator( $export_dir_path );
+		$num = 0;
 		foreach ( $export_dir_iterator as $year_dir ) {
 			$year = intval( $year_dir->getFilename() );
 
@@ -171,6 +156,7 @@ class TownNewsMigrator implements InterfaceCommand {
 
 				foreach ( $month_dir_iterator as $file ) {
 					if ( 'xml' === $file->getExtension() ) {
+						$this->logger->log( self::LOG_FILE, sprintf( '(%d) Importing post from %s', ++$num, $file->getFilename() ), Logger::INFO );
 						$post_id = $this->import_post_from_xml( $file->getPathname(), $month_dir->getPathname(), $imported_original_ids, $default_author_id );
 
 						if ( $post_id ) {
@@ -180,6 +166,8 @@ class TownNewsMigrator implements InterfaceCommand {
 				}
 			}
 		}
+
+		WP_CLI::warning( "Finished successfully. However, please rerun this exact same command a couple of times to make sure it picked up all the XMLs and posts." );
 	}
 
 	/**
@@ -461,8 +449,8 @@ class TownNewsMigrator implements InterfaceCommand {
 
 		// Set post content.
 		$post_content = 'collection' === $file_type
-		? $this->get_collection_content( $xml_doc, $dir_path, $post_id )
-		: $this->get_article_content( $xml_doc, $dir_path, $post_id );
+			? $this->get_collection_content( $xml_doc, $dir_path, $post_id )
+			: $this->get_article_content( $xml_doc, $dir_path, $post_id );
 
 		wp_update_post(
 			[
@@ -652,7 +640,6 @@ class TownNewsMigrator implements InterfaceCommand {
 		$last_name                  = '';
 		$email                      = '';
 		$avatar                     = '';
-		$using_email_as_displayname = false;
 
 		if ( ! empty( $author_meta ) ) {
 			$author_meta = current( $author_meta );
@@ -667,9 +654,14 @@ class TownNewsMigrator implements InterfaceCommand {
 		$display_name = str_starts_with( strtolower( $display_name ), 'by ' ) ? substr( $display_name, 3 ) : $display_name;
 		// if no display_name use email address.
 		if ( empty( $display_name ) ) {
-			$display_name               = $email;
-			$using_email_as_displayname = true;
+			$display_name = $first_name . ' ' . $last_name;
+			if ( empty( trim( $display_name ) ) ) {
+				// Let's do our very best to get a display name that is NOT the email.
+				$display_name = sanitize_user( strstr( $email, '@', true ) );
+			}
 		}
+		// Byline can sometimes contain HTML tags, so strip those here.
+		$display_name = trim( strip_tags( $display_name ) );
 
 		// Setting default author/co-author in case the article doesn't have any.
 		if ( empty( $display_name ) ) {
@@ -699,7 +691,15 @@ class TownNewsMigrator implements InterfaceCommand {
 			);
 		} else {
 			// Set as a co-author.
-			$guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login( $email );
+			$guest_author = $this->coauthorsplus_logic->get_guest_author_by_user_login( sanitize_user( $display_name ) );
+
+			if ( ! $guest_author ) {
+				// The user isn't found using an email, however, it still may already exist, just under a different display name.
+				// Under the hood, `$this->coauthorsplus_logic->create_guest_author()` uses this function to check that it
+				// isn't creating a duplicate Guest Author.
+				$guest_author = $this->coauthorsplus_logic->coauthors_plus->get_coauthor_by( 'user_login', sanitize_user( $display_name ) );
+			}
+
 			if ( $guest_author ) {
 				$author_id = $guest_author->ID;
 			} else {
@@ -712,22 +712,32 @@ class TownNewsMigrator implements InterfaceCommand {
 						$avatar_id = null;
 					}
 				}
-				$author_id = $this->coauthorsplus_logic->create_guest_author(
-					[
-						'display_name' => $display_name,
-						'first_name'   => $first_name,
-						'last_name'    => $last_name,
-						'user_email'   => $email,
-						'avatar'       => $avatar_id,
-					]
-				);
+				$guest_author_data = [
+					'display_name' => $display_name,
+					'first_name'   => $first_name,
+					'last_name'    => $last_name,
+					'user_email'   => $email,
+					'avatar'       => $avatar_id,
+				];
+				$author_id         = $this->coauthorsplus_logic->create_guest_author( $guest_author_data );
+
+				// At this point we've exhausted our attempts to search for a valid GA and we're getting an error.
+				// Let's just use the staff GA ID at this point, since we don't want the script to stop.
+				if ( is_wp_error( $author_id ) ) {
+					$this->logger->log( self::LOG_FILE, sprintf( 'Error creating author for Post ID %d, assigning Staff Account: %s', $post_id, $author_id->get_error_message() ), Logger::WARNING );
+					$this->logger->log( self::LOG_FILE, sprintf( 'Guest Author Data: %s', wp_json_encode( $guest_author_data ) ), Logger::INFO );
+					$author_id = $this->get_staff_author_id();
+				}
+			}
+			$check_author = $this->coauthorsplus_logic->get_guest_author_by_id( $author_id );
+			if ( empty( $check_author->user_nicename ) ) {
+				// There is validation in the Co-Authors Plus logic that gets very mad if nicename is not present. Let's just use the default author in that case.
+				$this->logger->log( self::LOG_FILE, sprintf( 'Have to use default author for Post ID %d, GA %d does not have a nicename', $post_id, $author_id ), Logger::WARNING );
+				$author_id = $this->get_staff_author_id();
 			}
 
 			$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $author_id ], $post_id );
 
-			if ( $using_email_as_displayname ) {
-				update_post_meta( $author_id, 'author_email_as_display_name', true );
-			}
 		}
 	}
 
@@ -1010,7 +1020,8 @@ class TownNewsMigrator implements InterfaceCommand {
 	 */
 	private function get_element_by_xpath( $parent_element, $xpath, $default = '' ) {
 		$element_node = $parent_element->xpath( $xpath );
-		return count( $element_node ) > 0 ? (string) $element_node[0] : $default;
+
+		return count( $element_node ) > 0 ? (string) trim( $element_node[0] ) : $default;
 	}
 
 	/**

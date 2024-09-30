@@ -2,18 +2,17 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \WP_CLI;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use \NewspackCustomContentMigrator\Logic\NinjaTables as NinjaTablesLogic;
 
 /**
  * NinjaTables Plugin Migrator.
  */
-class NinjaTablesMigrator implements InterfaceCommand {
-	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
+class NinjaTablesMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * @var NinjaTablesLogic $ninja_tables_logic
@@ -28,26 +27,12 @@ class NinjaTablesMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Sets up NinjaTables plugin dependencies.
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator export-ninja-tables',
-			array( $this, 'cmd_export_ninja_tables' ),
+			self::get_command_closure( 'cmd_export_ninja_tables' ),
 			array(
 				'shortdesc' => 'Export Ninja tables to a CSV or JSON file.',
 				'synopsis'  => array(

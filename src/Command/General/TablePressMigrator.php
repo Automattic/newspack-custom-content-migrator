@@ -2,18 +2,17 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \WP_CLI;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\TablePress as TablePressLogic;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use NewspackCustomContentMigrator\Logic\TablePress as TablePressLogic;
+use WP_CLI;
 
 /**
  * TablePress Plugin Migrator.
  */
-class TablePressMigrator implements InterfaceCommand {
-	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
+class TablePressMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * @var TablePressLogic $table_press_logic
@@ -28,26 +27,12 @@ class TablePressMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Sets up TablePress plugin dependencies.
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator import-table-press-tables',
-			array( $this, 'cmd_import_table_press' ),
+			self::get_command_closure( 'cmd_import_table_press' ),
 			array(
 				'shortdesc' => 'Import CSV or JSON files to TablePress plugin.',
 				'synopsis'  => array(

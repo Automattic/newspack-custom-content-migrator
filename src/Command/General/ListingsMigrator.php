@@ -2,11 +2,13 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Command\General\PostsMigrator;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \WP_CLI;
 
-class ListingsMigrator implements InterfaceCommand {
+class ListingsMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * @var string Listings entries.
@@ -24,36 +26,11 @@ class ListingsMigrator implements InterfaceCommand {
 	];
 
 	/**
-	 * @var null|InterfaceCommand Instance.
+	 * {@inheritDoc}
 	 */
-	private static $instance = null;
-
-	/**
-	 * Constructor.
-	 */
-	private function __construct() {
-	}
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class;
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command( 'newspack-content-migrator export-listings',
-			[ $this, 'cmd_export_listings' ],
+			self::get_command_closure( 'cmd_export_listings' ),
 			[
 				'shortdesc' => 'Exports Listings.',
 				'synopsis'  => [
@@ -69,7 +46,7 @@ class ListingsMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command( 'newspack-content-migrator import-listings',
-			[ $this, 'cmd_import_listings' ],
+			self::get_command_closure( 'cmd_import_listings' ),
 			[
 				'shortdesc' => 'Imports Listings.',
 				'synopsis'  => [

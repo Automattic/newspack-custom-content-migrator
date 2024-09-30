@@ -2,6 +2,9 @@
 
 namespace NewspackCustomContentMigrator\Command;
 
+/**
+ * @deprecated This interface is deprecated and will be removed in a future version.
+ */
 interface InterfaceCommand {
 
 	/**
