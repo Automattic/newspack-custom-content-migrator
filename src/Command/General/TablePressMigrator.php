@@ -12,7 +12,7 @@ use WP_CLI;
  */
 class TablePressMigrator implements RegisterCommandInterface {
 
-	use WpCliCommandTrait;
+			use WpCliCommandTrait;
 
 	/**
 	 * @var TablePressLogic $table_press_logic
@@ -36,7 +36,7 @@ class TablePressMigrator implements RegisterCommandInterface {
 			array(
 				'shortdesc' => 'Import CSV or JSON files to TablePress plugin.',
 				'synopsis'  => array(
-					array(
+array(
 						'type'        => 'assoc',
 						'name'        => 'input-dir',
 						'description' => 'Input directory full path (no ending slash).',
@@ -69,7 +69,7 @@ class TablePressMigrator implements RegisterCommandInterface {
 		}
 
 		$table_files  = array_filter( glob( $assoc_args['input-dir'] . '/*.' . $assoc_args['input-type'] ), 'is_file' );
-		$total_tables = count( $table_files );
+		$total_tables           = count( $table_files );
 
 		foreach ( $table_files as $key_table_file => $table_file ) {
 			WP_CLI::line( sprintf( 'Importing table %d/%d.', $key_table_file + 1, $total_tables ) );
