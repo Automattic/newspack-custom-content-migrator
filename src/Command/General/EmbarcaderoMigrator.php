@@ -9,7 +9,7 @@ use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\CSVFile;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
-use NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Util\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;

@@ -13,7 +13,7 @@ use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Logic\Posts;
-use NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Util\Logger;
 use stdClass;
 use WP_User;
 use WP_CLI;

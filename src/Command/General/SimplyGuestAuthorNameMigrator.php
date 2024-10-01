@@ -11,7 +11,7 @@ use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper as CoAuthorPlusLogic;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
-use NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Util\Logger;
 use WP_CLI;
 
 /**

@@ -8,7 +8,7 @@ use NewspackCustomContentMigrator\Logic\Medium;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
-use NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Util\Logger;
 use Symfony\Component\DomCrawler\Crawler;
 use WP_CLI;
 

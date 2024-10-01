@@ -6,7 +6,7 @@ use Exception;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Util\Logger;
 use Newspack\MigrationTools\Util\MigrationMeta;
 use WP_CLI;
 use WP_Post;

@@ -15,7 +15,7 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
-use NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Util\Logger;
 use WP_Post;
 
 /**

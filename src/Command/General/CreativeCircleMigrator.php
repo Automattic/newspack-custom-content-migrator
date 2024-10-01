@@ -7,7 +7,7 @@ use Newspack_Scraper_Migrator_Creative_Circle_Scraper;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Util\Logger;
 use WP_CLI;
 
 class CreativeCircleMigrator implements RegisterCommandInterface {
