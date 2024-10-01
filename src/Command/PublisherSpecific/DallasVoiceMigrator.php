@@ -11,6 +11,7 @@ use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
+use simplehtmldom\HtmlDocument;
 
 /**
  * Custom migration scripts for Dallas Voice.
@@ -50,7 +51,7 @@ class DallasVoiceMigrator implements InterfaceCommand {
 	 */
 	public function register_commands(): void {
 		WP_CLI::add_command(
-			'newspack-content-migrator dallasvoice-hide-featured-image-if-used-in-post-content --post-ids-csv=1000366485',
+			'newspack-content-migrator dallasvoice-hide-featured-image-if-used-in-post-content',
 			[ $this, 'cmd_hide_featured_image_if_used_in_post_content' ],
 			[
 				'shortdesc' => 'Hides the Featured Image if it\'s being used in post content',
@@ -62,6 +63,14 @@ class DallasVoiceMigrator implements InterfaceCommand {
 			[ $this, 'cmd_migrate_galleries_from_bwg_to_wp_gallery' ],
 			[
 				'shortdesc' => 'Migrates the Galleries from Best WordPress Gallery (Photo Gallery plugin) to WordPress Gallery block',
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator dallasvoice-fix-image-blocks-wrong-attachment-id-reference',
+			[ $this, 'cmd_fix_image_blocks_wrong_attachment_id_reference' ],
+			[
+				'shortdesc' => 'Fix wrong attachment ID reference in Image Blocks',
 			]
 		);
 	}
@@ -155,21 +164,38 @@ class DallasVoiceMigrator implements InterfaceCommand {
 						getcwd() . '/' . $gallery_image_data->image_url,
 					);
 
-					$attachment_id = media_handle_sideload(
-						[
-							'name' => str_replace( '/', '', $gallery_image_data->image_url ),
-							'tmp_name' => getcwd() . '/' . $gallery_image_data->image_url,
-						],
-						0,
-						$gallery_image_data->alt ?? $gallery_image_data->filename,
-						[
-							'post_author' => $default_author->ID,
-							'post_content' => $gallery_image_data->description,
-							'post_excerpt' => $gallery_image_data->description,
-						]
+					$attachment_id = $wpdb->get_var(
+						$wpdb->prepare(
+							"SELECT `post_id`
+							FROM `$wpdb->postmeta`
+							WHERE `meta_key` = 'newspack_bwg_image_id'
+							AND `meta_value` = %d",
+							$gallery_image_data->id
+						)
 					);
 
+					$filename = pathinfo( str_replace( '/', '', $gallery_image_data->image_url ) );
+					$filename = substr( $filename['filename'], 0, 150 ) . '.' . $filename['extension'];
+
+					if ( ! $attachment_id ) {
+						$attachment_id = media_handle_sideload(
+							[
+								'name' => $filename,
+								'tmp_name' => getcwd() . '/' . $gallery_image_data->image_url,
+							],
+							0,
+							$gallery_image_data->alt ?? $gallery_image_data->filename,
+							[
+								'post_author' => $default_author->ID,
+								'post_content' => $gallery_image_data->description,
+								'post_excerpt' => $gallery_image_data->description,
+							]
+						);
+					}
+
 					if ( is_wp_error( $attachment_id ) ) {
+						echo 'Post ID: ' . $post_id . "\r\n";
+						echo 'Gallery Image ID: ' . $gallery_image_data->id . "\r\n";
 						var_dump( 'WP Error',  $attachment_id );
 						exit;
 					}
@@ -218,6 +244,102 @@ class DallasVoiceMigrator implements InterfaceCommand {
 		WP_CLI::success( sprintf( 'Done. See %s', $log ) );
 	}
 
+	/** 
+	 * Migrates the Galleries from Best WordPress Gallery (Photo Gallery plugin) to WordPress Gallery block.
+	 */
+	public function cmd_fix_image_blocks_wrong_attachment_id_reference( array $args, array $assoc_args ): void {
+		$dry_run = ! empty( $assoc_args['dry-run'] ) ? (bool) $assoc_args['dry-run'] : false;
+		$post_id_from = ! empty( $assoc_args['post-id-from'] ) ? (int) $assoc_args['post-id-from'] : 0;
+
+		$migration_datetime = date( 'Y-m-d H-i-s' );
+		$migration_name = 'dallasvoice-fix-image-blocks' . ($dry_run ? '-dry-run' : '');
+
+		// Logs.
+		$log = $migration_datetime . '-' . $migration_name . '.log';
+
+		// CSV.
+		$csv              = $migration_datetime . '-' . $migration_name . '.csv';
+		$csv_file_pointer = fopen( $csv, 'w' );
+		fputcsv(
+			$csv_file_pointer,
+			[
+				'#',
+				'Post ID',
+				'Post Title',
+				'Old Content',
+				'New Content',
+				'Local URL',
+				'Staging URL',
+				'Live URL',
+			]
+		);
+
+		global $wpdb;
+
+		$post_ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT `ID` FROM `$wpdb->posts` WHERE `post_type` IN ('post', 'page') AND `ID` > $post_id_from AND `post_content` LIKE '%<!-- wp:image%'"
+			)
+		);
+
+		$progress_bar = WP_CLI\Utils\make_progress_bar( 'Fix Image Blocks', count( $post_ids ), 1 );
+
+		foreach ( $post_ids as $post_index => $post_id ) {
+			$progress_bar->tick(
+				1,
+				sprintf(
+					'DallasVoice: Fix Image Blocks [Post #%d: %d/%d] [Memory: %s]',
+					$post_id,
+					$post_index + 1,
+					count( $post_ids ),
+					size_format( memory_get_usage( true ) )
+				)
+			);
+
+			$old_content = get_post_field( 'post_content', $post_id );
+			$new_content = $old_content;
+
+			$blocks = parse_blocks( $old_content );
+
+			$new_blocks = $this->fix_image_blocks_recursively( $blocks );
+			$new_content = serialize_blocks( $new_blocks );
+
+			if ( $new_content === $old_content ) {
+				continue;
+			}
+
+			if ( ! $dry_run ) {
+				wp_save_post_revision( $post_id );
+				
+				wp_update_post( [
+					'ID' => $post_id,
+					'post_content' => $new_content,
+				] );
+			}
+
+			fputcsv(
+				$csv_file_pointer,
+				[
+					$post_index + 1, // #
+					$post_id, // Post ID
+					get_the_title( $post_id ), // Post Title
+					$old_content, // Old Content
+					$new_content, // New Content
+					get_permalink( $post_id ), // Local URL
+					str_replace( home_url( '/' ), 'https://dallasvoice-newspack.newspackstaging.com/', get_permalink( $post_id ) ), // Staging URL
+					str_replace( home_url( '/' ), 'https://dallasvoice.com/', get_permalink( $post_id ) ), // Live URL
+				]
+			);
+		}
+
+		$progress_bar->finish();
+
+		// Close CSV.
+		fclose( $csv_file_pointer );
+
+		WP_CLI::success( sprintf( 'Done. See %s', $log ) );
+	}
+
 	/**
 	 * Helper function to get Gallery Settings based on Shortcode ID.
 	 * 
@@ -245,5 +367,79 @@ class DallasVoiceMigrator implements InterfaceCommand {
 		}
 
 		return $settings;
+	}
+
+	/**
+	 * Fix Image Blocks recursively.
+	 * 
+	 * @return array
+	 */
+	private function fix_image_blocks_recursively( array &$blocks ): array {
+		foreach ( $blocks as $block_index => &$block ) {
+			if ( ! empty( $block['innerBlocks'] ) ) {
+				$this->fix_image_blocks_recursively( $block['innerBlocks'] );
+
+				continue;
+			}
+
+			if ( $block['blockName'] === 'core/image' ) {
+				$block = $this->get_fixed_image_block( $block );
+			}
+		}
+
+		return $blocks;
+	}
+
+	/**
+	 * Helper function to get Image block with fixed attributes.
+	 * 
+	 * For some reason some Image Blocks contain reference to Attachment ID which doesn't exist (e.g. 16226)
+	 * However, if you add 1000000000 (1 billion) to the Attachment ID, you might get the real image ID.
+	 * 
+	 * @return array
+	 */
+	private function get_fixed_image_block( array $image_block ): array {
+		if ( ! empty( $image_block['attrs']['id'] ) ) {
+			$block_doc = new HtmlDocument( $image_block['innerHTML'] );
+			$img_doc = $block_doc->find( 'img' );
+
+			if ( empty( $img_doc ) ) {
+				return $image_block;
+			}
+
+			$img_src = $img_doc[0]->getAttribute( 'src' );
+			$img_class = $img_doc[0]->getAttribute( 'class' );
+			preg_match( '~wp\-image\-([\d]+)~', $img_class, $img_class_id );
+
+			$attachment_id = attachment_url_to_postid( $img_src );
+
+			if ( empty( $attachment_id ) ) {
+				// Attachment ID is missing
+				// Not sure what to do next...
+				// Example Posts: 1342
+
+				return $image_block;
+			}
+
+			if ( $attachment_id === $img_class_id[1] + 1000000000 ) {
+				$image_block['attrs']['id'] = $img_class_id[1] + 1000000000;
+				$image_block['innerHTML'] = preg_replace( 
+					'~wp\-image\-' . $img_class_id[1] . '~',
+					'wp-image-' . $img_class_id[1] + 1000000000,
+					$image_block['innerHTML']
+				);
+				$image_block['innerContent'][0] = preg_replace( 
+					'~wp\-image\-' . $img_class_id[1] . '~',
+					'wp-image-' . $img_class_id[1] + 1000000000,
+					$image_block['innerContent'][0]
+				);
+				// echo 'File: ' . __FILE__ . "\r\n";
+				// echo 'Line: ' . __LINE__ . "\r\n";
+				// var_dump( $image_block, $image_block['attrs'], $img_src, $img_class, $attachment_id, $img_class_id );
+				// exit;
+			}
+		}
+
+		return $image_block;
 	}
 }
