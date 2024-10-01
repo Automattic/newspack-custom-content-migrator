@@ -6,7 +6,7 @@ use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\Logic\Posts as PostLogic;
-use Newspack\MigrationTools\Util\Logger;
+use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 use Symfony\Component\DomCrawler\Crawler;
 

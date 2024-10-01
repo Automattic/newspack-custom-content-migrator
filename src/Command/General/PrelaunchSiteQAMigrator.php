@@ -10,7 +10,7 @@ namespace NewspackCustomContentMigrator\Command\General;
 use Exception;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use Newspack\MigrationTools\Util\Logger;
+use NewspackCustomContentMigrator\Utils\Logger;
 use \WP_CLI;
 
 /**

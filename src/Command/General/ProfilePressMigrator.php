@@ -6,7 +6,7 @@ use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \NewspackCustomContentMigrator\Logic\Posts;
-use Newspack\MigrationTools\Util\Logger;
+use \NewspackCustomContentMigrator\Utils\Logger;
 use \WP_CLI;
 
 /**

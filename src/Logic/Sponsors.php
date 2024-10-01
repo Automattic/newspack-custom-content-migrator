@@ -7,7 +7,7 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
-use Newspack\MigrationTools\Util\Logger;
+use \NewspackCustomContentMigrator\Utils\Logger;
 
 class Sponsors {
 

@@ -5,7 +5,7 @@ namespace NewspackCustomContentMigrator\Command\General;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Posts;
-use Newspack\MigrationTools\Util\Logger;
+use NewspackCustomContentMigrator\Utils\Logger;
 use \WP_CLI;
 
 class PostsMigrator implements RegisterCommandInterface {

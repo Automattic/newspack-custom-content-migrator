@@ -12,9 +12,9 @@ use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Util\BatchLogic;
-use Newspack\MigrationTools\Util\Logger;
+use \NewspackCustomContentMigrator\Utils\Logger;
 use simplehtmldom\HtmlDocument;
-use WP_CLI;
+use \WP_CLI;
 
 /**
  * Attachments general Migrator command class.

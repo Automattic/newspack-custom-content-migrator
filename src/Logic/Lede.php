@@ -4,7 +4,7 @@ namespace NewspackCustomContentMigrator\Logic;
 
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use \NewspackCustomContentMigrator\Logic\Posts;
-use Newspack\MigrationTools\Util\Logger;
+use \NewspackCustomContentMigrator\Utils\Logger;
 
 /**
  * Lede migration logic.

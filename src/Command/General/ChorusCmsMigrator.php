@@ -9,7 +9,7 @@ use \NewspackCustomContentMigrator\Logic\Attachments;
 use \NewspackCustomContentMigrator\Logic\Posts;
 use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use \NewspackCustomContentMigrator\Logic\Taxonomy;
-use Newspack\MigrationTools\Util\Logger;
+use \NewspackCustomContentMigrator\Utils\Logger;
 use Symfony\Component\DomCrawler\Crawler;
 use \WP_CLI;
 
