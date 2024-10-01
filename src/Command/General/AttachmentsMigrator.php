@@ -11,7 +11,7 @@ use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use NewspackCustomContentMigrator\Utils\BatchLogic;
+use Newspack\MigrationTools\Util\BatchLogic;
 use \NewspackCustomContentMigrator\Utils\Logger;
 use simplehtmldom\HtmlDocument;
 use \WP_CLI;

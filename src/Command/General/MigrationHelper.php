@@ -4,7 +4,7 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Utils\BatchLogic;
+use Newspack\MigrationTools\Util\BatchLogic;
 use WP_CLI;
 use WP_CLI\ExitException;
 
