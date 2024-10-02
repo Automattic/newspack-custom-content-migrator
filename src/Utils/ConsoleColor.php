@@ -765,7 +765,7 @@ class ConsoleColor {
 		$text_sanitized = wp_kses( $text, wp_kses_allowed_html( 'post' ) );
 
 		if ( array_key_exists( $property, $this->$type ) ) {
-			$text_sanitized = $this->$type[ $property ] . $text_sanitized . '%n';
+			$text_sanitized = $this->{$type}[ $property ] . $text_sanitized . '%n';
 		}
 
 		return $text_sanitized;

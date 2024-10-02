@@ -359,7 +359,7 @@ class CarsonNowMigrator implements RegisterCommandInterface {
 	public function get_image_data_from_fid( $fid, $fallback_to_imagecache = true ): array {
 		$prefix = $this->get_prefix();
 		global $wpdb;
-		$result = $wpdb->get_results( "SELECT * FROM ${prefix}files WHERE fid = $fid", ARRAY_A );
+		$result = $wpdb->get_results( "SELECT * FROM {$prefix}files WHERE fid = $fid", ARRAY_A );
 		if ( empty( $result ) ) {
 			return [];
 		}
@@ -585,7 +585,7 @@ class CarsonNowMigrator implements RegisterCommandInterface {
 			$post = get_post( $post_id );
 			if ( $post instanceof \WP_Post ) {
 				if ( $log_progress ) {
-					WP_CLI::log( sprintf( 'Processing post %d/%d: %s', ++$counter, $total_posts, "${home_url}?p=${post_id}" ) );
+					WP_CLI::log( sprintf( 'Processing post %d/%d: %s', ++$counter, $total_posts, "{$home_url}?p={$post_id}" ) );
 				}
 				yield $post;
 			}
