@@ -45,7 +45,7 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-migration-tools.git",
-                "reference": "2d777af75d6df0606c89ece372382148dd03bb73"
+                "reference": "4f06347dd853256dcfa840fda4115fc95fc5faa4"
             },
             "require": {
                 "php": ">=8.1"
@@ -90,7 +90,7 @@
                 "GPL-3.0-or-later"
             ],
             "description": "A set of tools to help migration to WordPress.",
-            "time": "2024-10-02T08:03:00+00:00"
+            "time": "2024-10-04T14:22:08+00:00"
         },
         {
             "name": "automattic/newspack-post-image-downloader",
