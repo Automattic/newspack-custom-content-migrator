@@ -89,6 +89,7 @@ PluginSetup::register_command_classes(
 	[
 		Command\PublisherSpecific\CarsonNowMigrator::class,
 		Command\PublisherSpecific\ArkansasTimesMigrator::class,
+		Command\PublisherSpecific\DallasVoiceMigrator::class,
 		Command\PublisherSpecific\ZocaloMigrator::class,
 	]
 );
