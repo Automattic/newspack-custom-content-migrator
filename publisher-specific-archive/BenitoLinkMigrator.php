@@ -2,12 +2,12 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Posts;
-use \NewspackCustomContentMigrator\Logic\Attachments;
-use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use \NewspackCustomContentMigrator\Utils\Logger;
-use \WP_CLI;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\Attachments;
+use NewspackCustomContentMigrator\Logic\Posts;
+use NewspackCustomContentMigrator\Utils\Logger;
+use WP_CLI;
 
 /**
  * Custom migration scripts for BenitoLink.

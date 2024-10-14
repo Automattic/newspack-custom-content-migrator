@@ -3,10 +3,10 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Logic\Medium;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Logic\Medium;
 use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Utils\Logger;
 use Symfony\Component\DomCrawler\Crawler;

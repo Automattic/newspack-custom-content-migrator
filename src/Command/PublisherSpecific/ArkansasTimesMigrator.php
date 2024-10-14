@@ -8,9 +8,8 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;

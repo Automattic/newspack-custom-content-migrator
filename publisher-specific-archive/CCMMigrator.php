@@ -2,14 +2,14 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use WP_CLI;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
-use NewspackCustomContentMigrator\Utils\Logger;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
+use NewspackCustomContentMigrator\Utils\Logger;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Saporta News.

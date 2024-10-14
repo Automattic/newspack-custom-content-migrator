@@ -9,9 +9,9 @@ use DateTime;
 use DateTimeZone;
 use DOMElement;
 use Exception;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use WP_CLI;
 

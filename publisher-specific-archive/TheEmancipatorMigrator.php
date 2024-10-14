@@ -9,13 +9,13 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use CWS_PageLinksTo;
 use Exception;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Util\MigrationMeta;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\Logger;
-use Newspack\MigrationTools\Util\MigrationMeta;
 use simplehtmldom\HtmlDocument;
 use WP_CLI;
 use WP_CLI\ExitException;

@@ -4,14 +4,14 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use \NewspackCustomContentMigrator\Logic\Attachments;
-use \NewspackCustomContentMigrator\Logic\Posts;
-use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use \NewspackCustomContentMigrator\Logic\Taxonomy;
-use \NewspackCustomContentMigrator\Utils\Logger;
+use NewspackCustomContentMigrator\Logic\Attachments;
+use NewspackCustomContentMigrator\Logic\Posts;
+use NewspackCustomContentMigrator\Logic\Taxonomy;
+use NewspackCustomContentMigrator\Utils\Logger;
 use Symfony\Component\DomCrawler\Crawler;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Chorus CMS.

@@ -6,14 +6,14 @@ use DateTimeZone;
 use DOMDocument;
 use Exception;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use NewspackCustomContentMigrator\Logic\Attachments;
+use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\CSVFile;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\Logger;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
 use WP_CLI;
 

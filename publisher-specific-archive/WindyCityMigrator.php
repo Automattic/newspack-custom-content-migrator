@@ -4,9 +4,9 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\Taxonomy;

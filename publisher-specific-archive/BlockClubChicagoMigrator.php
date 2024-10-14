@@ -2,11 +2,11 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Posts;
-use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use \NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
-use \WP_CLI;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\Posts;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Block Club Chicago.
