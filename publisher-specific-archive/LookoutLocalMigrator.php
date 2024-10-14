@@ -2,20 +2,20 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Attachments;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use \NewspackCustomContentMigrator\Logic\Posts;
-use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use \NewspackCustomContentMigrator\Utils\PHP as PHP_Utils;
-use \NewspackCustomContentMigrator\Utils\Logger;
-use \NewspackCustomContentMigrator\Logic\Redirection;
-use \Newspack_Scraper_Migrator_Util;
-use \Newspack_Scraper_Migrator_HTML_Parser;
-use \NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
-use \WP_CLI;
-use Symfony\Component\DomCrawler\Crawler as Crawler;
 use DOMElement;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack_Scraper_Migrator_HTML_Parser;
+use Newspack_Scraper_Migrator_Util;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\Attachments;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\Posts;
+use NewspackCustomContentMigrator\Logic\Redirection;
+use NewspackCustomContentMigrator\Utils\Logger;
+use NewspackCustomContentMigrator\Utils\PHP as PHP_Utils;
+use Symfony\Component\DomCrawler\Crawler as Crawler;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Lookout Local.

@@ -8,13 +8,13 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Util\BatchLogic;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use Newspack\MigrationTools\Util\BatchLogic;
-use \NewspackCustomContentMigrator\Utils\Logger;
+use NewspackCustomContentMigrator\Utils\Logger;
 use simplehtmldom\HtmlDocument;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * Attachments general Migrator command class.

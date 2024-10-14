@@ -9,6 +9,7 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use WP_CLI;
 
 /**

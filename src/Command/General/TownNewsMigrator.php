@@ -2,15 +2,15 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
+use DirectoryIterator;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
-use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Utils\Logger;
-use NewspackCustomContentMigrator\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use \DirectoryIterator;
-use \SimpleXMLElement;
-use \WP_CLI;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use NewspackCustomContentMigrator\Logic\Attachments;
+use NewspackCustomContentMigrator\Utils\Logger;
+use SimpleXMLElement;
+use WP_CLI;
 
 class TownNewsMigrator implements RegisterCommandInterface {
 
