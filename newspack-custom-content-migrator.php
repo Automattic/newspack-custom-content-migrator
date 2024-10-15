@@ -80,12 +80,8 @@ PluginSetup::register_command_classes(
 		Command\General\SimplyGuestAuthorNameMigrator::class,
 		Command\General\TagDivThemesPluginsMigrator::class,
 		Command\General\GhostCMSMigrator::class,
-	]
-);
 
-PluginSetup::register_command_classes(
-	// Publisher specific commands. Remove from the array below when launched.
-	[
+		// Publisher specific commands. Remove from the array below when launched.
 		Command\PublisherSpecific\CarsonNowMigrator::class,
 		Command\PublisherSpecific\ArkansasTimesMigrator::class,
 		Command\PublisherSpecific\ZocaloMigrator::class,
