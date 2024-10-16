@@ -11,10 +11,12 @@ use DOMNodeList;
 use DOMXPath;
 use Exception;
 use Generator;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use Newspack\MigrationTools\Util\JsonIterator;
+use Newspack\MigrationTools\Util\MigrationMeta;
 use NewspackCustomContentMigrator\Command\General\DownloadMissingImages;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlusDataFixer;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Posts;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Taxonomy as TaxonomyConsoleOutputLogic;
@@ -26,9 +28,7 @@ use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use NewspackCustomContentMigrator\Utils\ConsoleTable;
-use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
-use Newspack\MigrationTools\Util\MigrationMeta;
 use WP_CLI;
 use WP_Http;
 use WP_Term;
@@ -119,6 +119,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 					'children' => array(),
 				),
 				array(
+					'name'     => 'Red Paisa',
 					'name'     => 'Red Paisa',
 					'children' => array(),
 				),
