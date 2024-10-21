@@ -8,6 +8,11 @@ This Plugin consists of various Migrators (which perform reusable or publisher-s
 
 Run `composer install`.
 
+### Running PHPCS
+* Run `composer run-script phpcs` to check for coding standards issues on all files. If you pass `-- path/to/file(s)` it will only run on that.
+* Run `composer run-script phpcbf` to automatically fix coding standards issues on all files. If you pass `-- path/to/file(s)` it will only run on that.
+* Run `composer run-script phpcs-unstaged-diff` to check the lines in files that have changes that are not staged yet.
+
 ## Working with the NMT (newspack-migration-tools)
 We are aiming to have all re-usable logic in the NMT. We pull in the NMT with composer, so that means that you need to keep your branch updated. Whenever code has been merged to trunk in the NMT, do a `composer update automattic/newspack-migration-tools` to update the lockfile and get the latest from the NMT into this repository. We point to the `dev-trunk` branch in this repo's composer file so run `composer update automattic/newspack-migration-tools` to update the lockfile and get the latest from the NMT. If nothing happens when you update, then run `composer clear-cache` and try again.
 

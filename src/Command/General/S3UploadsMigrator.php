@@ -1214,7 +1214,8 @@ class S3UploadsMigrator implements RegisterCommandInterface {
 	private function log( $file, $message, $to_cli = true ) {
 		$message .= "\n";
 		if ( $to_cli ) {
-			print $message;
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			echo $message;
 		}
 		// phpcs:ignore -- Logging is intended.
 		file_put_contents( $file, $message, FILE_APPEND );

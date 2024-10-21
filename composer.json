@@ -76,7 +76,7 @@
   },
   "scripts": {
     "phpcs": "./vendor/bin/phpcs",
-    "phpcs-unstaged-diff": "./vendor/bin/phpcs-changed --git --git-unstaged $(git diff --name-only | grep '\\.php$') || true",
+    "phpcs-unstaged-diff": "./vendor/bin/phpcs-changed --git --git-unstaged $(git diff --diff-filter=d  --name-only | grep '\\.php$' | tr '\\n' ' ') || true",
     "phpcbf": "./vendor/bin/phpcbf",
     "release": [
       "composer install --no-dev --optimize-autoloader",
