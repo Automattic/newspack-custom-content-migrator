@@ -9,18 +9,18 @@
   "repositories": [
     {
       "url": "https://github.com/Automattic/newspack-scraper-migrator.git",
-      "type": "git"
+      "type": "vcs"
     },
     {
       "url": "https://github.com/Automattic/newspack-post-image-downloader.git",
-      "type": "git"
+      "type": "vcs"
     },
     {
       "url": "https://github.com/Automattic/newspack-content-converter.git",
-      "type": "git"
+      "type": "vcs"
     },
     {
-        "type": "git",
+        "type": "vcs",
         "url": "https://github.com/Automattic/newspack-migration-tools.git"
     }
   ],
