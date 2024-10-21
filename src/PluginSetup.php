@@ -32,7 +32,7 @@ class PluginSetup {
 	 * 
 	 * @param string $level Error reporting level. 'dev' is default. 'live' will not change error reporting.
 	 */
-	public static function configure_error_reporting( $level = 'dev' ) {
+	public static function configure_error_reporting( $level = 'dev' ): void {
 		if ( 'dev' === $level ) {
 			// phpcs:disable -- Adds extra debugging config options for dev purposes.
 			@ini_set( 'display_errors', 1 );
@@ -52,8 +52,6 @@ class PluginSetup {
 			if ( ! defined( 'WP_DEBUG_DISPLAY' ) ) {
 				define( 'WP_DEBUG_DISPLAY', true );
 			}
-		} elseif( 'live' === $level ) {
-			// Do not alter default error reporting.
 		}
 	}
 
@@ -166,11 +164,14 @@ class PluginSetup {
 	 * @return void
 	 */
 	public static function add_hooks(): void {
-		// Disable the simple CLI logging from the migration tools and use WP_CLI's version.
-		add_filter('newspack_migration_tools_log_clilog_disable', '__return_true' );
+		add_filter( 'newspack_migration_tools_enable_cli_log', '__return_true' );
+		add_filter( 'newspack_migration_tools_enable_file_log', '__return_true' );
 
-		// And use our fancy WP_CLI logger instead.
-		add_action( 'newspack_migration_tools_cli_log', [ __CLASS__, 'action_cli_log' ], 10, 3 );
+//		// Disable the simple CLI logging from the migration tools and use WP_CLI's version.
+//		add_filter('newspack_migration_tools_log_clilog_disable', '__return_true' );
+//
+//		// And use our fancy WP_CLI logger instead.
+//		add_action( 'newspack_migration_tools_cli_log', [ __CLASS__, 'action_cli_log' ], 10, 3 );
 	}
 
 	/**
@@ -180,12 +181,12 @@ class PluginSetup {
 	 *
 	 * @return void
 	 */
-	public static function action_cli_log( string $message, string $level, bool $exit_on_error ): void {
-		static $logger = null;
-		if ( is_null( $logger ) ) {
-			$logger = new Utils\Logger();
-		}
-		$logger->wp_cli_log( $message, $level, $exit_on_error );
-	}
+//	public static function action_cli_log( string $message, string $level, bool $exit_on_error ): void {
+//		static $logger = null;
+//		if ( is_null( $logger ) ) {
+//			$logger = new Utils\Logger();
+//		}
+//		$logger->wp_cli_log( $message, $level, $exit_on_error );
+//	}
 
 }

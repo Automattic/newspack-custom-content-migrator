@@ -5,12 +5,14 @@
  * Plugin URI:  https://newspack.com
  * Author:      Automattic
  * Author URI:  https://newspack.com
- * Version:     1.6.1
+ * Version:     1.7.0
  *
  * @package  Newspack_Custom_Content_Migrator
  */
 
 namespace NewspackCustomContentMigrator;
+
+use Newspack\MigrationTools\NMT;
 
 // Don't do anything outside WP CLI.
 if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
@@ -18,7 +20,8 @@ if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 }
 
 require __DIR__ . '/vendor/autoload.php';
-require_once ABSPATH . 'wp-settings.php';
+NMT::setup();
+
 $error_reporting_level = false !== defined( 'NEWSPACK_CUSTOM_CONTENT_MIGRATOR_ERROR_REPORTING_LEVEL' ) ? NEWSPACK_CUSTOM_CONTENT_MIGRATOR_ERROR_REPORTING_LEVEL : 'dev';
 PluginSetup::configure_error_reporting( $error_reporting_level );
 PluginSetup::register_ticker();
@@ -81,12 +84,8 @@ PluginSetup::register_command_classes(
 		Command\General\SimplyGuestAuthorNameMigrator::class,
 		Command\General\TagDivThemesPluginsMigrator::class,
 		Command\General\GhostCMSMigrator::class,
-	]
-);
 
-PluginSetup::register_command_classes(
-	// Publisher specific commands. Remove from the array below when launched.
-	[
+		// Publisher specific commands. Remove from the array below when launched.
 		Command\PublisherSpecific\CarsonNowMigrator::class,
 		Command\PublisherSpecific\ArkansasTimesMigrator::class,
 		Command\PublisherSpecific\ZocaloMigrator::class,
