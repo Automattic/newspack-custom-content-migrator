@@ -120,7 +120,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				),
 				array(
 					'name'     => 'Red Paisa',
-					'name'     => 'Red Paisa',
 					'children' => array(),
 				),
 				array(
