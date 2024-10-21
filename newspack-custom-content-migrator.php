@@ -89,7 +89,7 @@ PluginSetup::register_command_classes(
 	[
 		Command\PublisherSpecific\CarsonNowMigrator::class,
 		Command\PublisherSpecific\ArkansasTimesMigrator::class,
-		Command\PublisherSpecific\ZocaloMigrator::class,
+		Command\PublisherSpecific\UgObserver::class,
 	]
 );
 
