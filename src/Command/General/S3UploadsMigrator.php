@@ -1214,7 +1214,7 @@ class S3UploadsMigrator implements RegisterCommandInterface {
 	private function log( $file, $message, $to_cli = true ) {
 		$message .= "\n";
 		if ( $to_cli ) {
-			fwrite( STDOUT, $message );
+			printf( '%s: %s', $message,  PHP_EOL);
 		}
 		// phpcs:ignore -- Logging is intended.
 		file_put_contents( $file, $message, FILE_APPEND );
