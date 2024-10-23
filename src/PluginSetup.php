@@ -164,14 +164,15 @@ class PluginSetup {
 	 * @return void
 	 */
 	public static function add_hooks(): void {
-		add_filter( 'newspack_migration_tools_enable_cli_log', '__return_true' );
-		add_filter( 'newspack_migration_tools_enable_file_log', '__return_true' );
-
-//		// Disable the simple CLI logging from the migration tools and use WP_CLI's version.
-//		add_filter('newspack_migration_tools_log_clilog_disable', '__return_true' );
-//
-//		// And use our fancy WP_CLI logger instead.
-//		add_action( 'newspack_migration_tools_cli_log', [ __CLASS__, 'action_cli_log' ], 10, 3 );
+		if ( ! defined( 'NCCM_DISABLE_CLI_LOG' ) || empty( 'NCCM_DISABLE_CLI_LOG' ) ) {
+			add_filter( 'newspack_migration_tools_enable_cli_log', '__return_true' );
+		}
+		if ( ! defined( 'NCCM_DISABLE_FILE_LOG' ) || empty( 'NCCM_DISABLE_FILE_LOG' ) ) {
+			add_filter( 'newspack_migration_tools_enable_file_log', '__return_true' );
+		}
+		if ( ! defined( 'NCCM_DISABLE_PLAIN_LOG' ) || empty( 'NCCM_DISABLE_PLAIN_LOG' ) ) {
+			add_filter( 'newspack_migration_tools_enable_plain_log', '__return_true' );
+		}
 	}
 
 	/**
