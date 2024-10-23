@@ -78,7 +78,6 @@ PluginSetup::register_command_classes(
 		Command\General\MolonguiAutorship::class,
 		Command\General\MediumMigrator::class,
 		Command\General\CreativeCircleMigrator::class,
-		Command\General\BlockTransformerCommand::class,
 		Command\General\PostDateMigrator::class,
 		Command\General\MediaCreditPluginMigrator::class,
 		Command\General\SimplyGuestAuthorNameMigrator::class,

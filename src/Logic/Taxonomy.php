@@ -7,10 +7,10 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
-use WP_CLI;
+use InvalidArgumentException;
 
 /**
- * Taxonomy implements common migration logic that are used to work with the Simple Local Avatars plugin
+ * Taxonomy logic
  */
 class Taxonomy {
 
@@ -290,5 +290,38 @@ class Taxonomy {
 		} while ( $slug_exists );
 
 		return $new_slug;
+	}
+
+	/**
+	 * Get terms from a taxonomy that are assigned to fewer than or equal to $assigned_to_max_num_posts posts.
+	 * This is useful for finding terms that are not assigned to many posts.
+	 *
+	 * @param string $taxonomy Taxonomy name - e.g. 'post_tag'.
+	 * @param int    $assigned_to_max_num_posts Max number of posts a term can be assigned to.
+	 *
+	 * @throws InvalidArgumentException If the taxonomy does not exist.
+	 * @return array Ids of terms assigned to fewer than or equal to $assigned_to_max_num_posts posts.
+	 */
+	public function get_terms_assigned_to_max_num_posts( string $taxonomy, int $assigned_to_max_num_posts ): array {
+		if ( ! taxonomy_exists( $taxonomy ) ) {
+			throw new InvalidArgumentException( esc_html( sprintf( 'Taxonomy "%s" does not exist.', $taxonomy ) ) );
+		}
+
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		return $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT t.term_id
+				FROM $wpdb->terms t
+					LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
+					LEFT JOIN $wpdb->term_relationships tr ON tt.term_taxonomy_id = tr.term_taxonomy_id
+				WHERE tt.taxonomy = %s
+			GROUP BY t.term_id
+			HAVING COUNT(tr.object_id) <= %d",
+				$taxonomy,
+				$assigned_to_max_num_posts
+			)
+		);
 	}
 }
