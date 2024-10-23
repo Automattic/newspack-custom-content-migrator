@@ -2,14 +2,14 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Utils\JsonIterator;
-use \NewspackCustomContentMigrator\Utils\Logger;
-use \NewspackCustomContentMigrator\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use \NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
-use \NewspackCustomContentMigrator\Logic\Sponsors;
-use \WP_CLI;
+use Newspack\MigrationTools\Util\JsonIterator;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\Attachments;
+use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
+use NewspackCustomContentMigrator\Logic\Sponsors;
+use NewspackCustomContentMigrator\Utils\Logger;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Retro Report.
