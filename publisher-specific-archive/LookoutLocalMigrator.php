@@ -13,8 +13,7 @@ use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Utils\Logger;
-use NewspackCustomContentMigrator\Utils\PHP as PHP_Utils;
-use Symfony\Component\DomCrawler\Crawler as Crawler;
+use Symfony\Component\DomCrawler\Crawler;
 use WP_CLI;
 
 /**
@@ -3632,7 +3631,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			WP_CLI::error( sprintf( 'Table %s not found.', $record_table ) );
 		}
 
-		$continue = PHP_Utils::readline( sprintf( 'Continuing will truncate the existing %s table. Continue? [y/n] ', $record_table ) );
+		echo esc_html( sprintf( 'Continuing will truncate the existing %s table. Continue? [y/n] ', $record_table ) );
+		$continue = strtolower( trim( fgets( STDIN ) ) );
 		if ( 'y' !== $continue ) {
 			WP_CLI::error( 'Aborting.' );
 		}
