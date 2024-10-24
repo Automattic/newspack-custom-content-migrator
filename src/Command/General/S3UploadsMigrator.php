@@ -882,6 +882,7 @@ class S3UploadsMigrator implements RegisterCommandInterface {
 					$url_size_local  = $this->append_suffix_to_file( $url_local_original, '-' . $size_name );
 					$url_size_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_size_local );
 					$size_paths[]    = [
+						'original_local_path' => $local_path_original,
 						'local_path' => $local_path_size,
 						'url_remote' => $url_size_remote,
 					];
@@ -892,6 +893,7 @@ class S3UploadsMigrator implements RegisterCommandInterface {
 						$url_size_local  = $this->append_suffix_to_file( $url_local, '-' . $size_name );
 						$url_size_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_size_local );
 						$size_paths[]    = [
+							'original_local_path' => $local_path,
 							'local_path' => $local_path_size,
 							'url_remote' => $url_size_remote,
 						];
@@ -902,6 +904,7 @@ class S3UploadsMigrator implements RegisterCommandInterface {
 					$url_size_local  = $this->append_suffix_to_file( $url_local, '-' . $size_name );
 					$url_size_remote = str_replace( '//' . $local_host . '/', '//' . $remote_host . '/', $url_size_local );
 					$size_paths[]    = [
+						'original_local_path' => $local_path,
 						'local_path' => $local_path_size,
 						'url_remote' => $url_size_remote,
 					];
@@ -914,13 +917,19 @@ class S3UploadsMigrator implements RegisterCommandInterface {
 					if ( file_exists( $local_path_size ) ) {
 						$this->log( $log, sprintf( '+ %s file exists %s, skipping', $size_name, $local_path_size ) );
 					} else {
-						// Fetch it.
-						$downloaded = $this->download_url_to_file( $url_size_remote, $local_path_size );
-						if ( is_wp_error( $downloaded ) || ! $downloaded ) {
-							$err_msg = is_wp_error( $downloaded ) ? $downloaded->get_error_message() : 'n/a';
-							$this->log( $log, sprintf( 'ERROR att. ID %d downloading size %s from %s err.msg: %s', $attachment_id, $size_name, $url_size_remote, $err_msg ) );
+						// Try to create it first, if you can't, then fetch it.
+						$maybe_resized_image = $this->resize_image( $size_path['original_local_path'], $width, $height );
+
+						if ( is_wp_error( $maybe_resized_image ) ) {
+							$downloaded = $this->download_url_to_file( $url_size_remote, $local_path_size );
+							if ( is_wp_error( $downloaded ) || ! $downloaded ) {
+								$err_msg = is_wp_error( $downloaded ) ? $downloaded->get_error_message() : 'n/a';
+								$this->log( $log, sprintf( 'ERROR att. ID %d downloading size %s from %s err.msg: %s', $attachment_id, $size_name, $url_size_remote, $err_msg ) );
+							} else {
+								$this->log( $log, sprintf( '+ downloaded %s', $url_size_remote ) );
+							}
 						} else {
-							$this->log( $log, sprintf( '+ downloaded %s', $url_size_remote ) );
+							$this->log( $log, sprintf( '+ resized %s', $local_path_size ) );
 						}
 					}
 				}
@@ -932,6 +941,80 @@ class S3UploadsMigrator implements RegisterCommandInterface {
 		WP_CLI::line( sprintf( 'All done! 🙌 See log %s for full details.', $log ) );
 	}
 
+	/**
+	 * This function uses the GD library to resize images locally.
+	 *
+	 * @param string $image_path Full path to the image.
+	 * @param int    $width New width.
+	 * @param int    $height New height.
+	 *
+	 * @return string|WP_Error
+	 */
+	public function resize_image( string $image_path, int $width, int $height ) {
+		if ( ! function_exists( 'gd_info' ) ) {
+			return new WP_Error( 'gd_not_installed', 'GD library is not installed.' );
+		}
+
+		if ( ! file_exists( $image_path ) ) {
+			return new WP_Error( 'image_not_found', 'Image not found.' );
+		}
+
+		// Get image info.
+		$image_info = getimagesize( $image_path );
+		if ( false === $image_info ) {
+			return new WP_Error( 'image_info_error', 'Could not get image info.' );
+		}
+		$mime_type             = $image_info['mime'];
+		$original_aspect_ratio = $image_info[0] / $image_info[1]; // width / height.
+		$resized_aspect_ratio  = $width / $height;
+		$resize_height         = $original_aspect_ratio > $resized_aspect_ratio ? -1 : $height;
+
+		// Create image resource.
+		$image = null;
+		switch ( $mime_type ) {
+			case 'image/jpeg':
+				$image = imagecreatefromjpeg( $image_path );
+				break;
+			case 'image/png':
+				$image = imagecreatefrompng( $image_path );
+				break;
+			case 'image/gif':
+				$image = imagecreatefromgif( $image_path );
+				break;
+			default:
+				return new WP_Error( 'unsupported_mime_type', 'Unsupported image mime type.' );
+		}
+
+		if ( ! $image ) {
+			return new WP_Error( 'image_create_error', 'Could not create image resource.' );
+		}
+
+		// Resize image.
+		$resized_image = imagescale( $image, $width, $resize_height );
+		if ( false === $resized_image ) {
+			return new WP_Error( 'image_resize_error', 'Could not resize image.' );
+		}
+
+		// Save resized image.
+		$resized_image_path = $this->append_suffix_to_file( $image_path, "-{$width}x$height" );
+		switch ( $mime_type ) {
+			case 'image/jpeg':
+				imagejpeg( $resized_image, $resized_image_path );
+				break;
+			case 'image/png':
+				imagepng( $resized_image, $resized_image_path );
+				break;
+			case 'image/gif':
+				imagegif( $resized_image, $resized_image_path );
+				break;
+		}
+
+		// Free memory.
+		imagedestroy( $image );
+		imagedestroy( $resized_image );
+
+		return $resized_image_path;
+	}
 	/**
 	 * Callable for `newspack-content-migrator s3uploads-discover-image-sizes-used-in-post-content`.
 	 *
