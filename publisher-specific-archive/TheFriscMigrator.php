@@ -3,13 +3,13 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\BatchLogic;
-use \NewspackCustomContentMigrator\Utils\Logger;
+use NewspackCustomContentMigrator\Utils\Logger;
 use simplehtmldom\HtmlDocument;
 use Symfony\Component\DomCrawler\Crawler;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Saporta News.

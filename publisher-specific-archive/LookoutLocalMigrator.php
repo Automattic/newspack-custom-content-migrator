@@ -2,20 +2,19 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Attachments;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use \NewspackCustomContentMigrator\Logic\Posts;
-use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use \NewspackCustomContentMigrator\Utils\PHP as PHP_Utils;
-use \NewspackCustomContentMigrator\Utils\Logger;
-use \NewspackCustomContentMigrator\Logic\Redirection;
-use \Newspack_Scraper_Migrator_Util;
-use \Newspack_Scraper_Migrator_HTML_Parser;
-use \NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
-use \WP_CLI;
-use Symfony\Component\DomCrawler\Crawler as Crawler;
 use DOMElement;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack_Scraper_Migrator_HTML_Parser;
+use Newspack_Scraper_Migrator_Util;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\Attachments;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use NewspackCustomContentMigrator\Logic\Posts;
+use NewspackCustomContentMigrator\Logic\Redirection;
+use NewspackCustomContentMigrator\Utils\Logger;
+use Symfony\Component\DomCrawler\Crawler;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Lookout Local.
@@ -3632,7 +3631,8 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			WP_CLI::error( sprintf( 'Table %s not found.', $record_table ) );
 		}
 
-		$continue = PHP_Utils::readline( sprintf( 'Continuing will truncate the existing %s table. Continue? [y/n] ', $record_table ) );
+		echo esc_html( sprintf( 'Continuing will truncate the existing %s table. Continue? [y/n] ', $record_table ) );
+		$continue = strtolower( trim( fgets( STDIN ) ) );
 		if ( 'y' !== $continue ) {
 			WP_CLI::error( 'Aborting.' );
 		}

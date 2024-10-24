@@ -55,12 +55,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-migration-tools.git",
-                "reference": "b9e8282975e459f6ad1a120e8e301ec3ae94244e"
+                "reference": "627107ceb2859e4f57205095efaebd351b8883eb"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/Automattic/newspack-migration-tools/zipball/b9e8282975e459f6ad1a120e8e301ec3ae94244e",
-                "reference": "b9e8282975e459f6ad1a120e8e301ec3ae94244e",
+                "url": "https://api.github.com/repos/Automattic/newspack-migration-tools/zipball/627107ceb2859e4f57205095efaebd351b8883eb",
+                "reference": "627107ceb2859e4f57205095efaebd351b8883eb",
                 "shasum": ""
             },
             "require": {
@@ -68,6 +68,8 @@
             },
             "require-dev": {
                 "automattic/vipwpcs": "^3.0",
+                "ext-dom": "*",
+                "ext-libxml": "*",
                 "halaxa/json-machine": "^1.1",
                 "php-coveralls/php-coveralls": "^2.7",
                 "phpcompatibility/phpcompatibility-wp": "*",
@@ -110,7 +112,7 @@
                 "source": "https://github.com/Automattic/newspack-migration-tools/tree/trunk",
                 "issues": "https://github.com/Automattic/newspack-migration-tools/issues"
             },
-            "time": "2024-10-23T10:06:17+00:00"
+            "time": "2024-10-24T10:02:31+00:00"
         },
         {
             "name": "automattic/newspack-post-image-downloader",

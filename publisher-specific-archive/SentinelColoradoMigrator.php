@@ -2,12 +2,12 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
 use NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
-use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Spheres of Influence.
