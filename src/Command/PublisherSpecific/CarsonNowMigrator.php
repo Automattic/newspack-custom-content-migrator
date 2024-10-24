@@ -9,7 +9,7 @@ use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Util\MigrationMeta;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockManipulator;
+use Newspack\MigrationTools\Logic\GutenbergBlockManipulator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 use WP_CLI\ExitException;

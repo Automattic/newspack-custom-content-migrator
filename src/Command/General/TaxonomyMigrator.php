@@ -2,12 +2,15 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
+use InvalidArgumentException;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Log\CliLogger;
+use Newspack\MigrationTools\Log\FileLogger;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use \NewspackCustomContentMigrator\Logic\Posts;
-use \NewspackCustomContentMigrator\Logic\Taxonomy;
+use NewspackCustomContentMigrator\Logic\Posts;
+use NewspackCustomContentMigrator\Logic\Taxonomy;
 use stdClass;
-use \WP_CLI;
+use WP_CLI;
 
 class TaxonomyMigrator implements RegisterCommandInterface {
 
@@ -23,7 +26,7 @@ class TaxonomyMigrator implements RegisterCommandInterface {
 	 *
 	 * @var Taxonomy $taxonomy_logic Taxonomy logic class.
 	 */
-	private $taxonomy_logic;
+	private Taxonomy $taxonomy_logic;
 
 	/**
 	 * List of taxonomy values recognized by WordPress.
@@ -163,6 +166,28 @@ class TaxonomyMigrator implements RegisterCommandInterface {
 						'description' => 'Tells the command to update the wp_term_taxonomy.count column first before proceeding.',
 						'optional'    => true,
 						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator delete-terms-assigned-to-max-posts',
+			self::get_command_closure( 'cmd_delete_terms_assigned_to_max_posts' ),
+			[
+				'shortdesc' => 'Will delete terms that are assigned to X or less posts.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'taxonomy',
+						'description' => 'The taxonomy to delete from. Eg. "post_tag" for tags.',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'max-posts-assigned',
+						'description' => 'Any term assigned to equal or fewer posts than this number will be deleted',
+						'optional'    => false,
 					],
 				],
 			]
@@ -681,6 +706,38 @@ class TaxonomyMigrator implements RegisterCommandInterface {
 		}
 
 		$progress_bar->finish();
+	}
+
+	/**
+	 * Deletes terms that are assigned to X or fewer posts.
+	 *
+	 * @param array $pos_args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws \Exception If anything goes wrong.
+	 */
+	public function cmd_delete_terms_assigned_to_max_posts( array $pos_args, array $assoc_args ): void {
+		$max_assigned_to_posts = $assoc_args['max-posts-assigned'];
+		$taxonomy              = $assoc_args['taxonomy'];
+		if ( ! is_numeric( $max_assigned_to_posts ) || $max_assigned_to_posts < 0 ) {
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			wp_die( sprintf( 'Argument "max-posts-assigned" (%s) is not a number or is negative', $max_assigned_to_posts ) );
+		}
+
+		try {
+			$terms = $this->taxonomy_logic->get_terms_assigned_to_max_num_posts( $taxonomy, $max_assigned_to_posts );
+		} catch ( InvalidArgumentException $e ) {
+			wp_die( esc_html( $e->getMessage() ) );
+		}
+
+		$logfile    = "deleted-{$taxonomy}-ids.log";
+		$term_count = count( $terms );
+		foreach ( $terms as $idx => $term_id ) {
+			wp_delete_term( $term_id, $taxonomy );
+			CliLogger::log( sprintf( '(%d of %d)', ++$idx, $term_count ) );
+			FileLogger::log( $logfile, $term_id );
+		}
 	}
 
 	/**

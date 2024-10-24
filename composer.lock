@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "cecd7f1d1cd846b53b7ad49e9e96fcde",
+    "content-hash": "2e8c2c02a82dd5d0d6a30a8df8287ba5",
     "packages": [
         {
             "name": "automattic/newspack-content-converter",
@@ -12,7 +12,13 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-content-converter.git",
-                "reference": "151ba7af4722f1e176275a879101d1950ee65145"
+                "reference": "3451882791264c0b2022acf01a5354312f087785"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/Automattic/newspack-content-converter/zipball/3451882791264c0b2022acf01a5354312f087785",
+                "reference": "3451882791264c0b2022acf01a5354312f087785",
+                "shasum": ""
             },
             "require": {
                 "composer/installers": "^1.7"
@@ -37,7 +43,11 @@
                 "GPL-2.0-or-later"
             ],
             "description": "Mass conversion of pre-Gutenberg Classic HTML post content to the Gutenberg blocks content.",
-            "time": "2024-09-30T14:05:34+00:00"
+            "support": {
+                "source": "https://github.com/Automattic/newspack-content-converter/tree/1.2.0",
+                "issues": "https://github.com/Automattic/newspack-content-converter/issues"
+            },
+            "time": "2024-10-04T09:56:56+00:00"
         },
         {
             "name": "automattic/newspack-migration-tools",
@@ -45,7 +55,13 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-migration-tools.git",
-                "reference": "4f06347dd853256dcfa840fda4115fc95fc5faa4"
+                "reference": "b9e8282975e459f6ad1a120e8e301ec3ae94244e"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/Automattic/newspack-migration-tools/zipball/b9e8282975e459f6ad1a120e8e301ec3ae94244e",
+                "reference": "b9e8282975e459f6ad1a120e8e301ec3ae94244e",
+                "shasum": ""
             },
             "require": {
                 "php": ">=8.1"
@@ -90,7 +106,11 @@
                 "GPL-3.0-or-later"
             ],
             "description": "A set of tools to help migration to WordPress.",
-            "time": "2024-10-04T14:22:08+00:00"
+            "support": {
+                "source": "https://github.com/Automattic/newspack-migration-tools/tree/trunk",
+                "issues": "https://github.com/Automattic/newspack-migration-tools/issues"
+            },
+            "time": "2024-10-23T10:06:17+00:00"
         },
         {
             "name": "automattic/newspack-post-image-downloader",
@@ -731,56 +751,6 @@
                 }
             ],
             "time": "2023-04-17T16:00:37+00:00"
-        },
-        {
-            "name": "mustache/mustache",
-            "version": "v2.14.2",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/bobthecow/mustache.php.git",
-                "reference": "e62b7c3849d22ec55f3ec425507bf7968193a6cb"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/bobthecow/mustache.php/zipball/e62b7c3849d22ec55f3ec425507bf7968193a6cb",
-                "reference": "e62b7c3849d22ec55f3ec425507bf7968193a6cb",
-                "shasum": ""
-            },
-            "require": {
-                "php": ">=5.2.4"
-            },
-            "require-dev": {
-                "friendsofphp/php-cs-fixer": "~1.11",
-                "phpunit/phpunit": "~3.7|~4.0|~5.0"
-            },
-            "type": "library",
-            "autoload": {
-                "psr-0": {
-                    "Mustache": "src/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Justin Hileman",
-                    "email": "justin@justinhileman.info",
-                    "homepage": "http://justinhileman.com"
-                }
-            ],
-            "description": "A Mustache implementation in PHP.",
-            "homepage": "https://github.com/bobthecow/mustache.php",
-            "keywords": [
-                "mustache",
-                "templating"
-            ],
-            "support": {
-                "issues": "https://github.com/bobthecow/mustache.php/issues",
-                "source": "https://github.com/bobthecow/mustache.php/tree/v2.14.2"
-            },
-            "time": "2022-08-23T13:07:01+00:00"
         },
         {
             "name": "myclabs/php-enum",

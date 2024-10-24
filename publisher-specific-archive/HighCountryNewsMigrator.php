@@ -9,13 +9,13 @@ use DOMElement;
 use Exception;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Util\JsonIterator;
 use Newspack\MigrationTools\Util\MigrationMeta;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
-use NewspackCustomContentMigrator\Utils\JsonIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
