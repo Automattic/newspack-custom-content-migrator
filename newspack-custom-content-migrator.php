@@ -84,6 +84,7 @@ PluginSetup::register_command_classes(
 		// Publisher specific commands. Remove from the array below when launched.
 		Command\PublisherSpecific\CarsonNowMigrator::class,
 		Command\PublisherSpecific\ArkansasTimesMigrator::class,
+		Command\PublisherSpecific\DallasVoiceMigrator::class,
 		Command\PublisherSpecific\ZocaloMigrator::class,
 	]
 );
